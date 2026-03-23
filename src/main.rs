@@ -1,5 +1,5 @@
-use clap::{Parser, Subcommand};
-use crypto_bigint::U2048;
+use clap::{Parser, Subcommand, ValueEnum};
+use crypto_bigint::Uint;
 
 use crate::el_gamal_pke::ElGamalPKE;
 
@@ -9,12 +9,26 @@ mod el_gamal_pke;
 // We'll need to rethink the CLI later once we add anamorphic too.
 #[derive(Parser, Debug, Clone)]
 struct Args {
+    size: Size,
+
     #[command(subcommand)]
-    mode: ElGamalPKEMode,
+    mode: Mode,
+}
+
+#[derive(ValueEnum, Debug, Clone)]
+enum Size {
+    /// Message space = {1, 2, 3, 4, 6, 8, 9, 12, 13, 16, 18}
+    Tiny,
+    /// 2048-bit primes
+    Small,
+    /// 3072-bit primes
+    Medium,
+    /// 4096-bit primes
+    Large,
 }
 
 #[derive(Subcommand, Debug, Clone)]
-enum ElGamalPKEMode {
+enum Mode {
     /// Generate public / secret key pair.
     Gen {},
     /// Encode some message using a public key.
@@ -38,22 +52,21 @@ enum ElGamalPKEMode {
     },
 }
 
-// This return type just means that we propagate errors from any result type up
-// to main by using the ? operator.
-fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let args = Args::parse();
-
-    let mut pke = ElGamalPKE::new_2048();
-    match args.mode {
-        ElGamalPKEMode::Gen {} => {
+fn run<const LIMBS: usize, MOD: crypto_bigint::modular::ConstMontyParams<LIMBS>>(
+    mut pke: ElGamalPKE<LIMBS, MOD>,
+    mode: &Mode,
+) -> Result<(), Box<dyn std::error::Error>> {
+    match mode {
+        Mode::Gen {} => {
             let (sk, pk) = pke.r#gen();
             println!("pk: {}", pk);
             println!("sk: {}", sk);
         }
-        ElGamalPKEMode::Enc { pk, m } => {
+        Mode::Enc { pk, m } => {
             // TODO: Parse these without panicking
-            let pk = U2048::from_be_hex(pk.as_str());
-            let m = U2048::from_be_hex(format!("{:0>512}", m).as_str());
+            let pk = Uint::<LIMBS>::from_be_hex(pk.as_str());
+            let m =
+                Uint::<LIMBS>::from_be_hex(format!("{:0>width$}", m, width = LIMBS * 16).as_str());
 
             if let Some((c1, c2)) = pke.enc(pk, m) {
                 println!("c1: {}", c1);
@@ -62,10 +75,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 eprintln!("The message is not in the message space.");
             }
         }
-        ElGamalPKEMode::Dec { sk, c1, c2 } => {
-            let sk = U2048::from_be_hex(sk.as_str());
-            let c1 = U2048::from_be_hex(c1.as_str());
-            let c2 = U2048::from_be_hex(c2.as_str());
+        Mode::Dec { sk, c1, c2 } => {
+            let sk = Uint::<LIMBS>::from_be_hex(sk.as_str());
+            let c1 = Uint::<LIMBS>::from_be_hex(c1.as_str());
+            let c2 = Uint::<LIMBS>::from_be_hex(c2.as_str());
 
             let m = pke.dec(sk, (c1, c2));
             println!("m: {}", m);
@@ -73,4 +86,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     Ok(())
+}
+
+// This return type just means that we propagate errors from any result type up
+// to main by using the ? operator.
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let args = Args::parse();
+
+    match args.size {
+        Size::Tiny => run(ElGamalPKE::new_tiny(), &args.mode),
+        Size::Small => run(ElGamalPKE::new_2048(), &args.mode),
+        Size::Medium => run(ElGamalPKE::new_3072(), &args.mode),
+        Size::Large => run(ElGamalPKE::new_4096(), &args.mode),
+    }
 }
