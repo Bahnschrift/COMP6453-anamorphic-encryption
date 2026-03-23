@@ -140,8 +140,14 @@ impl<const LIMBS: usize, MOD: ConstMontyParams<LIMBS>> ElGamalPKE<LIMBS, MOD> {
     // Note that we need &mut self here instead of just &self because using self.rng requires
     // mutating self.rng.
     pub fn r#gen(&mut self) -> (Uint<LIMBS>, Uint<LIMBS>) {
-        // sk = uniformly random integer < q
-        let sk = Uint::<LIMBS>::random_mod_vartime(&mut self.rng, &self.q);
+        // sk = uniformly random integer 1 <= k < q
+        // We subtract 1 for the modulus then add 1 after to prevent generating 0.
+        // This is important because a secret key of zero would result in a public key of 1,
+        // which would just reveal every message in c1.
+        let sk = Uint::<LIMBS>::random_mod_vartime(
+            &mut self.rng,
+            &NonZero::<Uint<LIMBS>>::new(*self.q - Uint::<LIMBS>::ONE).expect("Should have q > 1."),
+        ) + Uint::<LIMBS>::ONE;
 
         // pk = g^sk
         let pk = self.g.pow(&sk);
