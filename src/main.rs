@@ -1,5 +1,5 @@
 use clap::{Parser, Subcommand};
-use crypto_bigint::{U2048, U4096};
+use crypto_bigint::U4096;
 
 use crate::el_gamal_pke::{ElGamalPKE, Q};
 

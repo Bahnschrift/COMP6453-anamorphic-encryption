@@ -117,4 +117,28 @@ mod test {
         let m_dec = pke.dec(sk, (c1, c2));
         assert_eq!(m, m_dec);
     }
+
+    #[test]
+    fn enc_dec_valid_2() {
+        let mut pke = ElGamalPKE::new();
+        let (sk, pk) = pke.r#gen();
+
+        let m = U4096::from_u8(2);
+        let (c1, c2) = pke.enc(pk, m).expect("m should be in subgroup");
+
+        let m_dec = pke.dec(sk, (c1, c2));
+        assert_eq!(m, m_dec);
+    }
+
+    #[test]
+    fn enc_dec_valid_3() {
+        let mut pke = ElGamalPKE::new();
+        let (sk, pk) = pke.r#gen();
+
+        let m = U4096::from_u64(129836918726312);
+        let (c1, c2) = pke.enc(pk, m).expect("m should be in subgroup");
+
+        let m_dec = pke.dec(sk, (c1, c2));
+        assert_eq!(m, m_dec);
+    }
 }
