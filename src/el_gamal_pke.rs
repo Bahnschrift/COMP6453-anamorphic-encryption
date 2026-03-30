@@ -206,7 +206,14 @@ impl<const LIMBS: usize, MOD: ConstMontyParams<LIMBS>> ElGamalPKE<LIMBS, MOD> {
         if modq.pow(&self.q) == ConstMontyForm::<MOD, LIMBS>::ONE {
             modq
         } else {
-            modq.neg()
+            let neg = modq.neg();
+            debug_assert!(
+                neg.pow(&self.q) == ConstMontyForm::<MOD, LIMBS>::ONE,
+                "Something has gone wrong. We should have -{} is in G. Is p = 2 * q + 1?",
+                modq.retrieve()
+            );
+
+            neg
         }
     }
 
