@@ -186,6 +186,42 @@ impl<const LIMBS: usize, MOD: ConstMontyParams<LIMBS>> ElGamalPKE<LIMBS, MOD> {
         let c2 = ConstMontyForm::<MOD, LIMBS>::new(&c2);
         (c1 * c2.pow(&sk).invert().expect("Failed to invert")).retrieve()
     }
+
+    /// Converts some i in [1, q] to it's corresponding integer that is a member of G.
+    /// This allows us to map Z_q (kind of) to G, which makes encoding messages a lot easier,
+    /// since now the message space can be treated as Z_q instead of G (which has lots of gaps).
+    ///
+    /// This works by exploiting the fact that since p = 2 * q + 1 and both p and q are prime,
+    /// the quadratic residue modulo p are exactly the members of G.
+    /// We therefore map integers that are quadratic residue modulo p to themselves,
+    /// and integers that are not to their negation (which is guaranteed to be both > q and in G).
+    pub fn modq_to_message(&self, modq: Uint<LIMBS>) -> ConstMontyForm<MOD, LIMBS> {
+        debug_assert!(
+            Uint::<LIMBS>::ONE <= modq && modq <= *self.q,
+            "Message {} must be between 1 and q inclusive.",
+            modq
+        );
+
+        let modq = ConstMontyForm::<MOD, LIMBS>::new(&modq);
+        if modq.pow(&self.q) == ConstMontyForm::<MOD, LIMBS>::ONE {
+            modq
+        } else {
+            modq.neg()
+        }
+    }
+
+    /// Inverse operation of `modq_to_message`.
+    /// Converts some element of the message space to an integer modulo q.
+    ///
+    /// If an integer is >= q then it must have been mapped to through negation,
+    /// so we negate it to retrieve the original integer.
+    pub fn message_to_modq(&self, message: ConstMontyForm<MOD, LIMBS>) -> Uint<LIMBS> {
+        if message.retrieve() < *self.q {
+            message.retrieve()
+        } else {
+            message.neg().retrieve()
+        }
+    }
 }
 
 // Test functions in here can be run automatically with `cargo test`.
