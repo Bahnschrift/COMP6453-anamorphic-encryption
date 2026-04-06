@@ -1,10 +1,13 @@
 // This follows construction 5 from the paper
 
+use blake3::Hasher;
 use crypto_bigint::{
-    NonZero, RandomMod, Uint,
+    CtLt, Encoding, NonZero, RandomMod, Uint,
+    ctutils::unwrap_or,
     modular::{ConstMontyForm, ConstMontyParams},
 };
-use rand::{RngExt, SeedableRng, rngs::ChaCha20Rng};
+use rand::{Rng, RngExt, SeedableRng, rngs::ChaCha20Rng};
+use std::collections::HashMap;
 
 // Packaging these into a module so I can just collapse them in my editor
 #[allow(dead_code)] // Disables warnings just for the consts module
@@ -36,6 +39,18 @@ mod consts {
     pub(super) const G4096: u8 = 2;
 }
 
+/// Params used in AME
+/// We will not want these numbers to be too large or enc/dec will be painfully slow, u32 should be sufficient
+#[derive(Debug)]
+pub struct AnamParams {
+    /// The maxium length of the hidden message, we will generate a hash table of the same size
+    pub l: u32,
+    /// Search space of x
+    pub s: u32,
+    /// Search space of y
+    pub t: u32,
+}
+
 // There's quite a lot to unpack here...
 //
 // The crate we're using, crypto_bigint, gives us a bunch of types for storing very large integers (U256, U512, etc.).
@@ -52,6 +67,9 @@ pub struct ElGamalPKE<const LIMBS: usize, MOD: ConstMontyParams<LIMBS>> {
     rng: ChaCha20Rng,
     q: NonZero<Uint<LIMBS>>,
     g: ConstMontyForm<MOD, LIMBS>,
+    // AME params
+    /// The maxium length of the hidden message
+    ap: Option<AnamParams>,
 }
 
 // A helper macro for defining preset prime / generator / order tuples
@@ -120,12 +138,22 @@ impl<const LIMBS: usize, MOD: ConstMontyParams<LIMBS>> ElGamalPKE<LIMBS, MOD> {
         Self::new_seeded(q, g, rand::rng().random())
     }
 
+    pub fn new_with_ame(q: NonZero<Uint<LIMBS>>, g: Uint<LIMBS>, l: u32, s: u32, t: u32) -> Self {
+        Self {
+            rng: ChaCha20Rng::seed_from_u64(rand::rng().random()),
+            q,
+            g: ConstMontyForm::<MOD, LIMBS>::new(&g),
+            ap: Some(AnamParams { l, s, t }),
+        }
+    }
+
     pub fn new_seeded(q: NonZero<Uint<LIMBS>>, g: Uint<LIMBS>, seed: u64) -> Self {
         Self {
             // ChaCha20 is theoretically cryptographically secure.
             rng: ChaCha20Rng::seed_from_u64(seed),
             q,
             g: ConstMontyForm::<MOD, LIMBS>::new(&g),
+            ap: None,
         }
     }
 
@@ -185,6 +213,130 @@ impl<const LIMBS: usize, MOD: ConstMontyParams<LIMBS>> ElGamalPKE<LIMBS, MOD> {
         let c1 = ConstMontyForm::<MOD, LIMBS>::new(&c1);
         let c2 = ConstMontyForm::<MOD, LIMBS>::new(&c2);
         (c1 * c2.pow(&sk).invert().expect("Failed to invert")).retrieve()
+    }
+
+    /// Something work like a PRF, predictable by the reciever (F in python version)
+    fn anam_rng(&self, ak: [u8; 32], x: u32, y: u32) -> Uint<LIMBS> {
+        let mut hasher = Hasher::new();
+        hasher.update(&ak);
+        hasher.update(&x.to_le_bytes());
+        hasher.update(&y.to_le_bytes());
+
+        let mut reader = hasher.finalize_xof();
+        let mut buf = Uint::<LIMBS>::ZERO.to_le_bytes();
+        reader.fill(buf.as_mut_slice());
+
+        // Reject sampling to avoid modulo bias, make sure we are outputting a number uniformly random in [0, q)
+        // Looks bad in terms of performance, maybe we need to optimize this at some point
+        loop {
+            let mut buffer = Uint::<LIMBS>::ZERO.to_le_bytes();
+            reader.fill(buffer.as_mut_slice());
+
+            let val = Uint::<LIMBS>::from_le_bytes(buffer);
+
+            let is_valid: bool = val.ct_lt(&self.q).into();
+
+            if is_valid {
+                break val;
+            }
+        }
+    }
+
+    /// d in python version
+    /// Extracts the feature from c1 that the receiver can use to check if they have found the correct y
+    /// Take the lowest 32 bits from c1 and mod it by t, avoiding big int operations
+    fn anam_extract_feature(c1: &Uint<LIMBS>, t: u32) -> u32 {
+        let bytes = c1.to_le_bytes();
+        let mut buf = [0u8; 4];
+        buf.copy_from_slice(&bytes[0..4]);
+
+        let low_u32 = u32::from_le_bytes(buf);
+        low_u32 % t
+    }
+
+    /// Generates the anamorphic symmetric key and a hash table (K and T in the python version)
+    pub fn a_gen(&mut self) -> ([u8; 32], HashMap<Uint<LIMBS>, u32>) {
+        // The anamorphic symmetric key, 32 random bytes
+        let mut ak = [0u8; 32];
+        self.rng.fill(ak.as_mut_slice());
+
+        // The lookup table for the receiver to check if they have found the correct y
+        let mut t = HashMap::<Uint<LIMBS>, u32>::new();
+
+        let l = self.ap.as_ref().unwrap().l;
+        // Retrive all possible hidden messages
+        for i in 0..l {
+            let key = self.g.pow(&Uint::<LIMBS>::from_u64(i as u64)).retrieve();
+            t.insert(key, i);
+        }
+
+        (ak, t)
+    }
+
+    /// Encrypt a single block with the anamorphic encryption scheme
+    pub fn a_enc(
+        &mut self,
+        ak: [u8; 32],
+        pk: Uint<LIMBS>,
+        m: Uint<LIMBS>,
+        cm: u32,
+    ) -> Option<(Uint<LIMBS>, Uint<LIMBS>)> {
+        if m == Uint::<LIMBS>::ZERO || m >= Self::p() {
+            // Message outside of message space.
+            return None;
+        }
+
+        let m = ConstMontyForm::<MOD, LIMBS>::new(&m);
+        if m.pow(&self.q) != ConstMontyForm::<MOD, LIMBS>::ONE {
+            // Message not in subgroup generated by g
+            return None;
+        }
+
+        let ap = self.ap.as_ref().unwrap();
+        let pk = ConstMontyForm::<MOD, LIMBS>::new(&pk);
+
+        // reject sampling
+        loop {
+            let x = self.rng.next_u32() % ap.s;
+            let y = self.rng.next_u32() % ap.t;
+
+            let t_offset = self.anam_rng(ak, x, y);
+            // Hide the hidden message cm in the "random number" r
+            let r = t_offset.add_mod(&Uint::<LIMBS>::from_u32(cm), &self.q);
+
+            let feature = Self::anam_extract_feature(&self.g.pow(&r).retrieve(), ap.t);
+            if feature == y {
+                let c1 = m.mul(&pk.pow(&r)).retrieve();
+                let c2 = self.g.pow(&r).retrieve();
+                return Some((c1, c2));
+            }
+        }
+    }
+
+    /// Decrypts a single block encrypted with the anamorphic encryption scheme
+    /// Notice that this function only gives the hidden message
+    /// Use the normal dec function to retrieve the original message if needed
+    fn a_dec(
+        &self,
+        (c1, c2): (Uint<LIMBS>, Uint<LIMBS>),
+        ak: [u8; 32],
+        t_map: &HashMap<Uint<LIMBS>, u32>,
+    ) -> Option<u32> {
+        let ap = self.ap.as_ref().unwrap();
+        let y = Self::anam_extract_feature(&c1, ap.t);
+        let c1 = ConstMontyForm::<MOD, LIMBS>::new(&c1);
+
+        for x in 0..ap.s {
+            // Recover t_offset
+            let t = self.anam_rng(ak, x, y);
+            //
+            let s = c1.mul(&self.g.pow(&t).invert().unwrap()).retrieve();
+            if t_map.contains_key(&s) {
+                return Some(t_map[&s]);
+            }
+        }
+        // The ciphertext does not contain a valid hidden message
+        None
     }
 
     /// Converts some i in [1, q] to it's corresponding integer that is a member of G.
