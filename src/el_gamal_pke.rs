@@ -353,12 +353,16 @@ impl<const LIMBS: usize, MOD: ConstMontyParams<LIMBS>> ElGamalPKE<LIMBS, MOD> {
         for x in 0..ap.s {
             // Recover t_offset
             let t = self.anam_rng(ak, x, y);
-            //
-            let s = c2.mul(&self.g.pow(&t).invert().unwrap()).retrieve();
+            // Since we ensured that t_offset + cm < q when encrypting, we can be sure that t is also strictly less than q
+            // We will use g^{q-t} instead of g^{-t} to avoid interting t, which is terrible for performance
+            let t_neg = self.q.wrapping_sub(&t);
+            let s = c2.mul(&self.g.pow(&t_neg)).retrieve();
+
             if t_map.contains_key(&s) {
                 return Some(t_map[&s]);
             }
         }
+
         // The ciphertext does not contain a valid hidden message
         None
     }
