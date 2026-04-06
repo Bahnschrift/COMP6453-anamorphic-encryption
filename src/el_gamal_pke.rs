@@ -1,6 +1,6 @@
 // This follows construction 5 from the paper
 
-use blake3::Hasher;
+use sha2::{Digest, Sha256};
 use crypto_bigint::{
     CtLt, Encoding, NonZero, RandomMod, Uint,
     ctutils::unwrap_or,
@@ -240,29 +240,15 @@ impl<const LIMBS: usize, MOD: ConstMontyParams<LIMBS>> ElGamalPKE<LIMBS, MOD> {
 
     /// Something work like a PRF, predictable by the reciever (F in python version)
     fn anam_rng(&self, ak: [u8; 32], x: u32, y: u32) -> Uint<LIMBS> {
-        let mut hasher = Hasher::new();
+        let mut hasher = Sha256::new();
         hasher.update(&ak);
         hasher.update(&x.to_le_bytes());
         hasher.update(&y.to_le_bytes());
 
-        let mut reader = hasher.finalize_xof();
-        let mut buf = Uint::<LIMBS>::ZERO.to_le_bytes();
-        reader.fill(buf.as_mut_slice());
-
-        // Reject sampling to avoid modulo bias, make sure we are outputting a number uniformly random in [0, q)
-        // Looks bad in terms of performance, maybe we need to optimize this at some point
-        loop {
-            let mut buffer = Uint::<LIMBS>::ZERO.to_le_bytes();
-            reader.fill(buffer.as_mut_slice());
-
-            let val = Uint::<LIMBS>::from_le_bytes(buffer);
-
-            let is_valid: bool = val.ct_lt(&self.q).into();
-
-            if is_valid {
-                break val;
-            }
-        }
+        let seed: [u8; 32] = hasher.finalize().into();
+        
+        let mut rng = ChaCha20Rng::from_seed(seed);
+        Uint::<LIMBS>::random_mod_vartime(&mut rng, &self.q)
     }
 
     /// d in python version
@@ -417,8 +403,7 @@ mod test {
     use crypto_bigint::{U64, U2048, U3072, U4096};
 
     use crate::el_gamal_pke::{
-        ElGamal4096, ElGamalPKE, ElGamalTiny,
-        consts::{P2048_STR, P3072_STR, P4096_STR, Q2048_STR, Q3072_STR, Q4096_STR},
+        ElGamal2048, ElGamal3072, ElGamal4096, ElGamalPKE, ElGamalTiny, consts::{P2048_STR, P3072_STR, P4096_STR, Q2048_STR, Q3072_STR, Q4096_STR}
     };
 
     #[test]
@@ -539,8 +524,59 @@ mod test {
     }
 
     #[test]
+    fn test_anam_enc_dec_tiny_valid() {
+        let mut pke = ElGamalTiny::new_tiny_with_ame(4, 1, 1);
+        let (sk, pk) = pke.r#gen();
+        let (ak, t_map) = pke.a_gen();
+        let m = U64::from_u8(3);
+        let cm = 1;
+
+        let (c1, c2) = pke.a_enc(ak, pk, m, cm).expect("Should be able to encrypt with AME");
+
+        let m_dec = pke.dec(sk, (c1, c2));
+        assert_eq!(m, m_dec);
+
+        let cm_dec = pke.a_dec((c1, c2), ak, &t_map).expect("Should be able to decrypt with AME");
+        assert_eq!(cm, cm_dec);
+    }
+
+    #[test]
+    fn test_anam_enc_dec_2048_valid() {
+        let mut pke = ElGamal2048::new_2048_with_ame(16, 64, 64);
+        let (sk, pk) = pke.r#gen();
+        let (ak, t_map) = pke.a_gen();
+        let m = U2048::from_u8(5);
+        let cm = 4;
+
+        let (c1, c2) = pke.a_enc(ak, pk, m, cm).expect("Should be able to encrypt with AME");
+
+        let m_dec = pke.dec(sk, (c1, c2));
+        assert_eq!(m, m_dec);
+
+        let cm_dec = pke.a_dec((c1, c2), ak, &t_map).expect("Should be able to decrypt with AME");
+        assert_eq!(cm, cm_dec);
+    }
+
+    #[test]
+    fn test_anam_enc_dec_3072_valid() {
+        let mut pke = ElGamal3072::new_3072_with_ame(16, 64, 64);
+        let (sk, pk) = pke.r#gen();
+        let (ak, t_map) = pke.a_gen();
+        let m = U3072::from_u8(4);
+        let cm = 4;
+        
+        let (c1, c2) = pke.a_enc(ak, pk, m, cm).expect("Should be able to encrypt with AME");
+
+        let m_dec = pke.dec(sk, (c1, c2));
+        assert_eq!(m, m_dec);
+
+        let cm_dec = pke.a_dec((c1, c2), ak, &t_map).expect("Should be able to decrypt with AME");
+        assert_eq!(cm, cm_dec);
+    }
+
+    #[test]
     fn test_anam_enc_dec_4096_valid() {
-        let mut pke = ElGamal4096::new_4096_with_ame(64, 256, 256);
+        let mut pke = ElGamal4096::new_4096_with_ame(16, 64, 64);
         let (sk, pk) = pke.r#gen();
         let (ak, t_map) = pke.a_gen();
         let m = U4096::from_u8(5);
