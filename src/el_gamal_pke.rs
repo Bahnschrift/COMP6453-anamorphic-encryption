@@ -74,7 +74,16 @@ pub struct ElGamalPKE<const LIMBS: usize, MOD: ConstMontyParams<LIMBS>> {
 
 // A helper macro for defining preset prime / generator / order tuples
 macro_rules! el_gamal_impl {
-    ($t:ident, $modt:ident, $newfn:ident, $limbs:expr, $pstr:expr, $qstr: expr, $g:expr $(,)?) => {
+    (
+        $t:ident,
+        $modt:ident,
+        $newfn:ident, 
+        $limbs:expr,
+        $pstr:expr,
+        $qstr: expr,
+        $g:expr $(,)?,
+        $new_ame_fn:ident
+    ) => {
         crypto_bigint::const_prime_monty_params!($modt, crypto_bigint::Uint<$limbs>, $pstr, $g);
         pub type $t = ElGamalPKE<$limbs, $modt>;
 
@@ -83,6 +92,16 @@ macro_rules! el_gamal_impl {
                 Self::new(
                     NonZero::<Uint<$limbs>>::new_unwrap(Uint::<$limbs>::from_be_hex($qstr)),
                     Uint::<$limbs>::from_u64($g),
+                )
+            }
+
+            pub fn $new_ame_fn(l: u32, s: u32, t: u32) -> Self {
+                Self::new_with_ame(
+                    NonZero::<Uint<$limbs>>::new_unwrap(Uint::<$limbs>::from_be_hex($qstr)),
+                    Uint::<$limbs>::from_u64($g),
+                    l,
+                    s,
+                    t,
                 )
             }
         }
@@ -96,7 +115,8 @@ el_gamal_impl!(
     1,
     consts::PTINY_STR,
     consts::QTINY_STR,
-    2
+    2,
+    new_tiny_with_ame
 );
 el_gamal_impl!(
     ElGamal2048,
@@ -105,7 +125,8 @@ el_gamal_impl!(
     32,
     consts::P2048_STR,
     consts::Q2048_STR,
-    2
+    2,
+    new_2048_with_ame
 );
 el_gamal_impl!(
     ElGamal3072,
@@ -114,7 +135,8 @@ el_gamal_impl!(
     48,
     consts::P3072_STR,
     consts::Q3072_STR,
-    2
+    2,
+    new_3072_with_ame
 );
 el_gamal_impl!(
     ElGamal4096,
@@ -123,7 +145,8 @@ el_gamal_impl!(
     64,
     consts::P4096_STR,
     consts::Q4096_STR,
-    2
+    2,
+    new_4096_with_ame
 );
 
 impl<const LIMBS: usize, MOD: ConstMontyParams<LIMBS>> ElGamalPKE<LIMBS, MOD> {
@@ -243,10 +266,10 @@ impl<const LIMBS: usize, MOD: ConstMontyParams<LIMBS>> ElGamalPKE<LIMBS, MOD> {
     }
 
     /// d in python version
-    /// Extracts the feature from c1 that the receiver can use to check if they have found the correct y
-    /// Take the lowest 32 bits from c1 and mod it by t, avoiding big int operations
-    fn anam_extract_feature(c1: &Uint<LIMBS>, t: u32) -> u32 {
-        let bytes = c1.to_le_bytes();
+    /// Extracts the feature from c2 that the receiver can use to check if they have found the correct y
+    /// Take the lowest 32 bits from c2 and mod it by t, avoiding big int operations
+    fn anam_extract_feature(c2: &Uint<LIMBS>, t: u32) -> u32 {
+        let bytes = c2.to_le_bytes();
         let mut buf = [0u8; 4];
         buf.copy_from_slice(&bytes[0..4]);
 
@@ -265,9 +288,10 @@ impl<const LIMBS: usize, MOD: ConstMontyParams<LIMBS>> ElGamalPKE<LIMBS, MOD> {
 
         let l = self.ap.as_ref().unwrap().l;
         // Retrive all possible hidden messages
+        let mut current_g = ConstMontyForm::<MOD, LIMBS>::ONE;
         for i in 0..l {
-            let key = self.g.pow(&Uint::<LIMBS>::from_u64(i as u64)).retrieve();
-            t.insert(key, i);
+            t.insert(current_g.retrieve(), i);
+            current_g = current_g.mul(&self.g);
         }
 
         (ak, t)
@@ -304,10 +328,10 @@ impl<const LIMBS: usize, MOD: ConstMontyParams<LIMBS>> ElGamalPKE<LIMBS, MOD> {
             // Hide the hidden message cm in the "random number" r
             let r = t_offset.add_mod(&Uint::<LIMBS>::from_u32(cm), &self.q);
 
-            let feature = Self::anam_extract_feature(&self.g.pow(&r).retrieve(), ap.t);
+            let c2 = self.g.pow(&r).retrieve();
+            let feature = Self::anam_extract_feature(&c2, ap.t);
             if feature == y {
                 let c1 = m.mul(&pk.pow(&r)).retrieve();
-                let c2 = self.g.pow(&r).retrieve();
                 return Some((c1, c2));
             }
         }
@@ -318,19 +342,19 @@ impl<const LIMBS: usize, MOD: ConstMontyParams<LIMBS>> ElGamalPKE<LIMBS, MOD> {
     /// Use the normal dec function to retrieve the original message if needed
     fn a_dec(
         &self,
-        (c1, c2): (Uint<LIMBS>, Uint<LIMBS>),
+        (_c1, c2): (Uint<LIMBS>, Uint<LIMBS>),
         ak: [u8; 32],
         t_map: &HashMap<Uint<LIMBS>, u32>,
     ) -> Option<u32> {
         let ap = self.ap.as_ref().unwrap();
-        let y = Self::anam_extract_feature(&c1, ap.t);
-        let c1 = ConstMontyForm::<MOD, LIMBS>::new(&c1);
+        let y = Self::anam_extract_feature(&c2, ap.t);
+        let c2 = ConstMontyForm::<MOD, LIMBS>::new(&c2);
 
         for x in 0..ap.s {
             // Recover t_offset
             let t = self.anam_rng(ak, x, y);
             //
-            let s = c1.mul(&self.g.pow(&t).invert().unwrap()).retrieve();
+            let s = c2.mul(&self.g.pow(&t).invert().unwrap()).retrieve();
             if t_map.contains_key(&s) {
                 return Some(t_map[&s]);
             }
@@ -389,7 +413,7 @@ mod test {
     use crypto_bigint::{U64, U2048, U3072, U4096};
 
     use crate::el_gamal_pke::{
-        ElGamalPKE,
+        ElGamal4096, ElGamalPKE, ElGamalTiny,
         consts::{P2048_STR, P3072_STR, P4096_STR, Q2048_STR, Q3072_STR, Q4096_STR},
     };
 
@@ -508,5 +532,22 @@ mod test {
                 assert_eq!(m, m_dec);
             }
         }
+    }
+
+    #[test]
+    fn test_anam_enc_dec_4096_valid() {
+        let mut pke = ElGamal4096::new_4096_with_ame(64, 256, 256);
+        let (sk, pk) = pke.r#gen();
+        let (ak, t_map) = pke.a_gen();
+        let m = U4096::from_u8(5);
+        let cm = 4;
+        
+        let (c1, c2) = pke.a_enc(ak, pk, m, cm).expect("Should be able to encrypt with AME");
+
+        let m_dec = pke.dec(sk, (c1, c2));
+        assert_eq!(m, m_dec);
+        
+        let cm_dec = pke.a_dec((c1, c2), ak, &t_map).expect("Should be able to decrypt with AME");
+        assert_eq!(cm, cm_dec);
     }
 }
