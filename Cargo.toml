@@ -7,4 +7,5 @@ edition = "2024"
 clap = { version = "4.6.0", features = ["derive"] }
 crypto-bigint = { version = "0.7.2" }
 rand = { version = "0.10.0", features = ["chacha"] }
+rayon = "1.11.0"
 sha2 = "0.11.0"

@@ -2,12 +2,12 @@
 
 use sha2::{Digest, Sha256};
 use crypto_bigint::{
-    CtLt, Encoding, NonZero, RandomMod, Uint,
-    ctutils::unwrap_or,
+    NonZero, RandomMod, Uint,
     modular::{ConstMontyForm, ConstMontyParams},
 };
 use rand::{Rng, RngExt, SeedableRng, rngs::ChaCha20Rng};
 use std::collections::HashMap;
+use rayon::prelude::*;
 
 // Packaging these into a module so I can just collapse them in my editor
 #[allow(dead_code)] // Disables warnings just for the consts module
@@ -336,21 +336,19 @@ impl<const LIMBS: usize, MOD: ConstMontyParams<LIMBS>> ElGamalPKE<LIMBS, MOD> {
         let y = Self::anam_extract_feature(&c2, ap.t);
         let c2 = ConstMontyForm::<MOD, LIMBS>::new(&c2);
 
-        for x in 0..ap.s {
-            // Recover t_offset
+        let result = (0..ap.s).into_par_iter().find_map_any(|x| {
             let t = self.anam_rng(ak, x, y);
-            // Since we ensured that t_offset + cm < q when encrypting, we can be sure that t is also strictly less than q
-            // We will use g^{q-t} instead of g^{-t} to avoid interting t, which is terrible for performance
             let t_neg = self.q.wrapping_sub(&t);
-            let s = c2.mul(&self.g.pow(&t_neg)).retrieve();
-
-            if t_map.contains_key(&s) {
-                return Some(t_map[&s]);
+            let s_val = c2.mul(&self.g.pow(&t_neg)).retrieve();
+            
+            if t_map.contains_key(&s_val) {
+                Some(t_map[&s_val])
+            } else {
+                None
             }
-        }
+        });
 
-        // The ciphertext does not contain a valid hidden message
-        None
+        result
     }
 
     /// Converts some i in [1, q] to it's corresponding integer that is a member of G.
