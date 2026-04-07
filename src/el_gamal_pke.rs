@@ -51,6 +51,8 @@ pub struct AnamParams {
     pub t: u32,
 }
 
+pub type AnamKey = [u8; 32];
+
 // There's quite a lot to unpack here...
 //
 // The crate we're using, crypto_bigint, gives us a bunch of types for storing very large integers (U256, U512, etc.).
@@ -233,13 +235,13 @@ impl<const LIMBS: usize, MOD: ConstMontyParams<LIMBS>> ElGamalPKE<LIMBS, MOD> {
     }
 
     /// Something work like a PRF, predictable by the reciever (F in python version)
-    fn anam_rng(&self, ak: [u8; 32], x: u32, y: u32) -> Uint<LIMBS> {
+    fn anam_rng(&self, ak: AnamKey, x: u32, y: u32) -> Uint<LIMBS> {
         let mut hasher = Sha256::new();
         hasher.update(&ak);
         hasher.update(&x.to_le_bytes());
         hasher.update(&y.to_le_bytes());
 
-        let seed: [u8; 32] = hasher.finalize().into();
+        let seed: AnamKey = hasher.finalize().into();
 
         let mut rng = ChaCha20Rng::from_seed(seed);
         Uint::<LIMBS>::random_mod_vartime(&mut rng, &self.q)
@@ -258,7 +260,7 @@ impl<const LIMBS: usize, MOD: ConstMontyParams<LIMBS>> ElGamalPKE<LIMBS, MOD> {
     }
 
     /// Generates the anamorphic symmetric key and a hash table (K and T in the python version)
-    pub fn a_gen(&mut self) -> ([u8; 32], HashMap<Uint<LIMBS>, u32>) {
+    pub fn a_gen(&mut self) -> (AnamKey, HashMap<Uint<LIMBS>, u32>) {
         // The anamorphic symmetric key, 32 random bytes
         let mut ak = [0u8; 32];
         self.rng.fill(ak.as_mut_slice());
@@ -280,7 +282,7 @@ impl<const LIMBS: usize, MOD: ConstMontyParams<LIMBS>> ElGamalPKE<LIMBS, MOD> {
     /// Encrypt a single block with the anamorphic encryption scheme
     pub fn a_enc(
         &mut self,
-        ak: [u8; 32],
+        ak: AnamKey,
         pk: Uint<LIMBS>,
         m: Uint<LIMBS>,
         cm: u32,
@@ -323,7 +325,7 @@ impl<const LIMBS: usize, MOD: ConstMontyParams<LIMBS>> ElGamalPKE<LIMBS, MOD> {
     fn a_dec(
         &self,
         (_c1, c2): (Uint<LIMBS>, Uint<LIMBS>),
-        ak: [u8; 32],
+        ak: AnamKey,
         t_map: &HashMap<Uint<LIMBS>, u32>,
     ) -> Option<u32> {
         let ap = self.ap.as_ref().unwrap();
