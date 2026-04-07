@@ -75,7 +75,6 @@ pub struct ElGamalPKE<const LIMBS: usize, MOD: ConstMontyParams<LIMBS>> {
 // A helper macro for defining preset prime / generator / order tuples
 macro_rules! el_gamal_impl {
     (
-        $t:ident,
         $modt:ident,
         $newfn:ident,
         $limbs:expr,
@@ -85,9 +84,8 @@ macro_rules! el_gamal_impl {
         $new_ame_fn:ident
     ) => {
         crypto_bigint::const_prime_monty_params!($modt, crypto_bigint::Uint<$limbs>, $pstr, $g);
-        pub type $t = ElGamalPKE<$limbs, $modt>;
 
-        impl $t {
+        impl ElGamalPKE<$limbs, $modt> {
             pub fn $newfn() -> Self {
                 Self::new(
                     NonZero::<Uint<$limbs>>::new_unwrap(Uint::<$limbs>::from_be_hex($qstr)),
@@ -109,7 +107,6 @@ macro_rules! el_gamal_impl {
 }
 
 el_gamal_impl!(
-    ElGamalTiny,
     ModPTiny,
     new_tiny,
     1,
@@ -119,7 +116,6 @@ el_gamal_impl!(
     new_tiny_with_ame
 );
 el_gamal_impl!(
-    ElGamal2048,
     ModP2048,
     new_2048,
     32,
@@ -129,7 +125,6 @@ el_gamal_impl!(
     new_2048_with_ame
 );
 el_gamal_impl!(
-    ElGamal3072,
     ModP3072,
     new_3072,
     48,
@@ -139,7 +134,6 @@ el_gamal_impl!(
     new_3072_with_ame
 );
 el_gamal_impl!(
-    ElGamal4096,
     ModP4096,
     new_4096,
     64,
@@ -401,7 +395,7 @@ mod tests {
     use crypto_bigint::{U64, U2048, U3072, U4096};
 
     use crate::el_gamal_pke::{
-        ElGamal2048, ElGamal3072, ElGamal4096, ElGamalPKE, ElGamalTiny,
+        ElGamalPKE,
         consts::{P2048_STR, P3072_STR, P4096_STR, Q2048_STR, Q3072_STR, Q4096_STR},
     };
 
@@ -537,7 +531,7 @@ mod tests {
 
         #[test]
         fn test_anam_enc_dec_tiny_valid() {
-            let mut pke = ElGamalTiny::new_tiny_with_ame(4, 1, 1);
+            let mut pke = ElGamalPKE::new_tiny_with_ame(4, 1, 1);
             let (sk, pk) = pke.r#gen();
             let (ak, t_map) = pke.a_gen();
             let m = U64::from_u8(3);
@@ -558,7 +552,7 @@ mod tests {
 
         #[test]
         fn test_anam_enc_dec_2048_valid() {
-            let mut pke = ElGamal2048::new_2048_with_ame(16, 64, 64);
+            let mut pke = ElGamalPKE::new_2048_with_ame(16, 64, 64);
             let (sk, pk) = pke.r#gen();
             let (ak, t_map) = pke.a_gen();
             let m = U2048::from_u8(5);
@@ -579,7 +573,7 @@ mod tests {
 
         #[test]
         fn test_anam_enc_dec_3072_valid() {
-            let mut pke = ElGamal3072::new_3072_with_ame(16, 64, 64);
+            let mut pke = ElGamalPKE::new_3072_with_ame(16, 64, 64);
             let (sk, pk) = pke.r#gen();
             let (ak, t_map) = pke.a_gen();
             let m = U3072::from_u8(4);
@@ -600,7 +594,7 @@ mod tests {
 
         #[test]
         fn test_anam_enc_dec_4096_valid() {
-            let mut pke = ElGamal4096::new_4096_with_ame(16, 64, 64);
+            let mut pke = ElGamalPKE::new_4096_with_ame(16, 64, 64);
             let (sk, pk) = pke.r#gen();
             let (ak, t_map) = pke.a_gen();
             let m = U4096::from_u8(5);
