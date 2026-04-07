@@ -1,13 +1,13 @@
 // This follows construction 5 from the paper
 
-use sha2::{Digest, Sha256};
 use crypto_bigint::{
     NonZero, RandomMod, Uint,
     modular::{ConstMontyForm, ConstMontyParams},
 };
 use rand::{Rng, RngExt, SeedableRng, rngs::ChaCha20Rng};
-use std::collections::HashMap;
 use rayon::prelude::*;
+use sha2::{Digest, Sha256};
+use std::collections::HashMap;
 
 // Packaging these into a module so I can just collapse them in my editor
 #[allow(dead_code)] // Disables warnings just for the consts module
@@ -77,7 +77,7 @@ macro_rules! el_gamal_impl {
     (
         $t:ident,
         $modt:ident,
-        $newfn:ident, 
+        $newfn:ident,
         $limbs:expr,
         $pstr:expr,
         $qstr: expr,
@@ -246,7 +246,7 @@ impl<const LIMBS: usize, MOD: ConstMontyParams<LIMBS>> ElGamalPKE<LIMBS, MOD> {
         hasher.update(&y.to_le_bytes());
 
         let seed: [u8; 32] = hasher.finalize().into();
-        
+
         let mut rng = ChaCha20Rng::from_seed(seed);
         Uint::<LIMBS>::random_mod_vartime(&mut rng, &self.q)
     }
@@ -340,7 +340,7 @@ impl<const LIMBS: usize, MOD: ConstMontyParams<LIMBS>> ElGamalPKE<LIMBS, MOD> {
             let t = self.anam_rng(ak, x, y);
             let t_neg = self.q.wrapping_sub(&t);
             let s_val = c2.mul(&self.g.pow(&t_neg)).retrieve();
-            
+
             if t_map.contains_key(&s_val) {
                 Some(t_map[&s_val])
             } else {
@@ -397,195 +397,226 @@ impl<const LIMBS: usize, MOD: ConstMontyParams<LIMBS>> ElGamalPKE<LIMBS, MOD> {
 
 // Test functions in here can be run automatically with `cargo test`.
 #[cfg(test)]
-mod test {
+mod tests {
     use crypto_bigint::{U64, U2048, U3072, U4096};
 
     use crate::el_gamal_pke::{
-        ElGamal2048, ElGamal3072, ElGamal4096, ElGamalPKE, ElGamalTiny, consts::{P2048_STR, P3072_STR, P4096_STR, Q2048_STR, Q3072_STR, Q4096_STR}
+        ElGamal2048, ElGamal3072, ElGamal4096, ElGamalPKE, ElGamalTiny,
+        consts::{P2048_STR, P3072_STR, P4096_STR, Q2048_STR, Q3072_STR, Q4096_STR},
     };
 
-    #[test]
-    fn verify_q_2048() {
-        assert_eq!(
-            U2048::from_be_hex(Q2048_STR),
-            (U2048::from_be_hex(P2048_STR) - U2048::ONE) / U2048::from_u8(2)
-        );
+    /// General tests
+    mod general {
+        use super::*;
+
+        // Verifies p = 2 * q + 1
+        #[test]
+        fn verify_q_2048() {
+            assert_eq!(
+                U2048::from_be_hex(Q2048_STR),
+                (U2048::from_be_hex(P2048_STR) - U2048::ONE) / U2048::from_u8(2)
+            );
+        }
+
+        #[test]
+        fn verify_q_3072() {
+            assert_eq!(
+                U3072::from_be_hex(Q3072_STR),
+                (U3072::from_be_hex(P3072_STR) - U3072::ONE) / U3072::from_u8(2)
+            );
+        }
+
+        #[test]
+        fn verify_q_4096() {
+            assert_eq!(
+                U4096::from_be_hex(Q4096_STR),
+                (U4096::from_be_hex(P4096_STR) - U4096::ONE) / U4096::from_u8(2)
+            );
+        }
     }
 
-    #[test]
-    fn verify_q_3072() {
-        assert_eq!(
-            U3072::from_be_hex(Q3072_STR),
-            (U3072::from_be_hex(P3072_STR) - U3072::ONE) / U3072::from_u8(2)
-        );
-    }
+    mod normal {
+        use super::*;
 
-    #[test]
-    fn verify_q_4096() {
-        assert_eq!(
-            U4096::from_be_hex(Q4096_STR),
-            (U4096::from_be_hex(P4096_STR) - U4096::ONE) / U4096::from_u8(2)
-        );
-    }
+        #[test]
+        fn enc_dec_2048_valid_1() {
+            let mut pke = ElGamalPKE::new_2048();
+            let (sk, pk) = pke.r#gen();
 
-    #[test]
-    fn enc_dec_2048_valid_1() {
-        let mut pke = ElGamalPKE::new_2048();
-        let (sk, pk) = pke.r#gen();
+            let m = U2048::from_u8(5);
+            let (c1, c2) = pke.enc(pk, m).expect("m should be in subgroup");
 
-        let m = U2048::from_u8(5);
-        let (c1, c2) = pke.enc(pk, m).expect("m should be in subgroup");
+            let m_dec = pke.dec(sk, (c1, c2));
+            assert_eq!(m, m_dec);
+        }
+        #[test]
+        fn enc_dec_2048_valid_2() {
+            let mut pke = ElGamalPKE::new_2048();
+            let (sk, pk) = pke.r#gen();
 
-        let m_dec = pke.dec(sk, (c1, c2));
-        assert_eq!(m, m_dec);
-    }
-    #[test]
-    fn enc_dec_2048_valid_2() {
-        let mut pke = ElGamalPKE::new_2048();
-        let (sk, pk) = pke.r#gen();
+            let m = U2048::from_u8(2);
+            let (c1, c2) = pke.enc(pk, m).expect("m should be in subgroup");
 
-        let m = U2048::from_u8(2);
-        let (c1, c2) = pke.enc(pk, m).expect("m should be in subgroup");
+            let m_dec = pke.dec(sk, (c1, c2));
+            assert_eq!(m, m_dec);
+        }
 
-        let m_dec = pke.dec(sk, (c1, c2));
-        assert_eq!(m, m_dec);
-    }
+        #[test]
+        fn enc_dec_2048_valid_3() {
+            let mut pke = ElGamalPKE::new_2048();
+            let (sk, pk) = pke.r#gen();
 
-    #[test]
-    fn enc_dec_2048_valid_3() {
-        let mut pke = ElGamalPKE::new_2048();
-        let (sk, pk) = pke.r#gen();
+            let m = U2048::from_u64(129836918726312);
+            let (c1, c2) = pke.enc(pk, m).expect("m should be in subgroup");
 
-        let m = U2048::from_u64(129836918726312);
-        let (c1, c2) = pke.enc(pk, m).expect("m should be in subgroup");
+            let m_dec = pke.dec(sk, (c1, c2));
+            assert_eq!(m, m_dec);
+        }
 
-        let m_dec = pke.dec(sk, (c1, c2));
-        assert_eq!(m, m_dec);
-    }
+        #[test]
+        fn enc_dec_4096_valid_1() {
+            let mut pke = ElGamalPKE::new_4096();
+            let (sk, pk) = pke.r#gen();
 
-    #[test]
-    fn enc_dec_4096_valid_1() {
-        let mut pke = ElGamalPKE::new_4096();
-        let (sk, pk) = pke.r#gen();
+            let m = U4096::from_u8(5);
+            let (c1, c2) = pke.enc(pk, m).expect("m should be in subgroup");
 
-        let m = U4096::from_u8(5);
-        let (c1, c2) = pke.enc(pk, m).expect("m should be in subgroup");
+            let m_dec = pke.dec(sk, (c1, c2));
+            assert_eq!(m, m_dec);
+        }
 
-        let m_dec = pke.dec(sk, (c1, c2));
-        assert_eq!(m, m_dec);
-    }
+        #[test]
+        fn enc_dec_4096_valid_2() {
+            let mut pke = ElGamalPKE::new_4096();
+            let (sk, pk) = pke.r#gen();
 
-    #[test]
-    fn enc_dec_4096_valid_2() {
-        let mut pke = ElGamalPKE::new_4096();
-        let (sk, pk) = pke.r#gen();
+            let m = U4096::from_u8(2);
+            let (c1, c2) = pke.enc(pk, m).expect("m should be in subgroup");
 
-        let m = U4096::from_u8(2);
-        let (c1, c2) = pke.enc(pk, m).expect("m should be in subgroup");
+            let m_dec = pke.dec(sk, (c1, c2));
+            assert_eq!(m, m_dec);
+        }
 
-        let m_dec = pke.dec(sk, (c1, c2));
-        assert_eq!(m, m_dec);
-    }
+        #[test]
+        fn enc_dec_4096_valid_3() {
+            let mut pke = ElGamalPKE::new_4096();
+            let (sk, pk) = pke.r#gen();
 
-    #[test]
-    fn enc_dec_4096_valid_3() {
-        let mut pke = ElGamalPKE::new_4096();
-        let (sk, pk) = pke.r#gen();
+            let m = U4096::from_u64(129836918726312);
+            let (c1, c2) = pke.enc(pk, m).expect("m should be in subgroup");
 
-        let m = U4096::from_u64(129836918726312);
-        let (c1, c2) = pke.enc(pk, m).expect("m should be in subgroup");
+            let m_dec = pke.dec(sk, (c1, c2));
+            assert_eq!(m, m_dec);
+        }
 
-        let m_dec = pke.dec(sk, (c1, c2));
-        assert_eq!(m, m_dec);
-    }
+        const SMALL_PKE_MESSAGE_SPACE: [u8; 11] = [1, 2, 3, 4, 6, 8, 9, 12, 13, 16, 18];
 
-    const SMALL_PKE_MESSAGE_SPACE: [u8; 11] = [1, 2, 3, 4, 6, 8, 9, 12, 13, 16, 18];
+        // Validates that all appropriate messages are accepted / rejected.
+        #[test]
+        fn test_small() {
+            let mut pke = ElGamalPKE::new_tiny();
 
-    // Validates that all appropriate messages are accepted / rejected.
-    #[test]
-    fn test_small() {
-        let mut pke = ElGamalPKE::new_tiny();
+            let (sk, pk) = pke.r#gen();
 
-        let (sk, pk) = pke.r#gen();
+            for i in 0..=23 {
+                let m = U64::from_u8(i);
 
-        for i in 0..=23 {
-            let m = U64::from_u8(i);
-
-            let c = pke.enc(pk, m);
-            if !SMALL_PKE_MESSAGE_SPACE.contains(&i) {
-                assert_eq!(c, None);
-            } else {
-                let m_dec = pke.dec(sk, c.expect("m should be in subgroup"));
-                assert_eq!(m, m_dec);
+                let c = pke.enc(pk, m);
+                if !SMALL_PKE_MESSAGE_SPACE.contains(&i) {
+                    assert_eq!(c, None);
+                } else {
+                    let m_dec = pke.dec(sk, c.expect("m should be in subgroup"));
+                    assert_eq!(m, m_dec);
+                }
             }
         }
     }
 
-    #[test]
-    fn test_anam_enc_dec_tiny_valid() {
-        let mut pke = ElGamalTiny::new_tiny_with_ame(4, 1, 1);
-        let (sk, pk) = pke.r#gen();
-        let (ak, t_map) = pke.a_gen();
-        let m = U64::from_u8(3);
-        let cm = 1;
+    mod anamorphic {
+        use super::*;
 
-        let (c1, c2) = pke.a_enc(ak, pk, m, cm).expect("Should be able to encrypt with AME");
+        #[test]
+        fn test_anam_enc_dec_tiny_valid() {
+            let mut pke = ElGamalTiny::new_tiny_with_ame(4, 1, 1);
+            let (sk, pk) = pke.r#gen();
+            let (ak, t_map) = pke.a_gen();
+            let m = U64::from_u8(3);
+            let cm = 1;
 
-        let m_dec = pke.dec(sk, (c1, c2));
-        assert_eq!(m, m_dec);
+            let (c1, c2) = pke
+                .a_enc(ak, pk, m, cm)
+                .expect("Should be able to encrypt with AME");
 
-        let cm_dec = pke.a_dec((c1, c2), ak, &t_map).expect("Should be able to decrypt with AME");
-        assert_eq!(cm, cm_dec);
-    }
+            let m_dec = pke.dec(sk, (c1, c2));
+            assert_eq!(m, m_dec);
 
-    #[test]
-    fn test_anam_enc_dec_2048_valid() {
-        let mut pke = ElGamal2048::new_2048_with_ame(16, 64, 64);
-        let (sk, pk) = pke.r#gen();
-        let (ak, t_map) = pke.a_gen();
-        let m = U2048::from_u8(5);
-        let cm = 4;
+            let cm_dec = pke
+                .a_dec((c1, c2), ak, &t_map)
+                .expect("Should be able to decrypt with AME");
+            assert_eq!(cm, cm_dec);
+        }
 
-        let (c1, c2) = pke.a_enc(ak, pk, m, cm).expect("Should be able to encrypt with AME");
+        #[test]
+        fn test_anam_enc_dec_2048_valid() {
+            let mut pke = ElGamal2048::new_2048_with_ame(16, 64, 64);
+            let (sk, pk) = pke.r#gen();
+            let (ak, t_map) = pke.a_gen();
+            let m = U2048::from_u8(5);
+            let cm = 4;
 
-        let m_dec = pke.dec(sk, (c1, c2));
-        assert_eq!(m, m_dec);
+            let (c1, c2) = pke
+                .a_enc(ak, pk, m, cm)
+                .expect("Should be able to encrypt with AME");
 
-        let cm_dec = pke.a_dec((c1, c2), ak, &t_map).expect("Should be able to decrypt with AME");
-        assert_eq!(cm, cm_dec);
-    }
+            let m_dec = pke.dec(sk, (c1, c2));
+            assert_eq!(m, m_dec);
 
-    #[test]
-    fn test_anam_enc_dec_3072_valid() {
-        let mut pke = ElGamal3072::new_3072_with_ame(16, 64, 64);
-        let (sk, pk) = pke.r#gen();
-        let (ak, t_map) = pke.a_gen();
-        let m = U3072::from_u8(4);
-        let cm = 4;
-        
-        let (c1, c2) = pke.a_enc(ak, pk, m, cm).expect("Should be able to encrypt with AME");
+            let cm_dec = pke
+                .a_dec((c1, c2), ak, &t_map)
+                .expect("Should be able to decrypt with AME");
+            assert_eq!(cm, cm_dec);
+        }
 
-        let m_dec = pke.dec(sk, (c1, c2));
-        assert_eq!(m, m_dec);
+        #[test]
+        fn test_anam_enc_dec_3072_valid() {
+            let mut pke = ElGamal3072::new_3072_with_ame(16, 64, 64);
+            let (sk, pk) = pke.r#gen();
+            let (ak, t_map) = pke.a_gen();
+            let m = U3072::from_u8(4);
+            let cm = 4;
 
-        let cm_dec = pke.a_dec((c1, c2), ak, &t_map).expect("Should be able to decrypt with AME");
-        assert_eq!(cm, cm_dec);
-    }
+            let (c1, c2) = pke
+                .a_enc(ak, pk, m, cm)
+                .expect("Should be able to encrypt with AME");
 
-    #[test]
-    fn test_anam_enc_dec_4096_valid() {
-        let mut pke = ElGamal4096::new_4096_with_ame(16, 64, 64);
-        let (sk, pk) = pke.r#gen();
-        let (ak, t_map) = pke.a_gen();
-        let m = U4096::from_u8(5);
-        let cm = 4;
-        
-        let (c1, c2) = pke.a_enc(ak, pk, m, cm).expect("Should be able to encrypt with AME");
+            let m_dec = pke.dec(sk, (c1, c2));
+            assert_eq!(m, m_dec);
 
-        let m_dec = pke.dec(sk, (c1, c2));
-        assert_eq!(m, m_dec);
-        
-        let cm_dec = pke.a_dec((c1, c2), ak, &t_map).expect("Should be able to decrypt with AME");
-        assert_eq!(cm, cm_dec);
+            let cm_dec = pke
+                .a_dec((c1, c2), ak, &t_map)
+                .expect("Should be able to decrypt with AME");
+            assert_eq!(cm, cm_dec);
+        }
+
+        #[test]
+        fn test_anam_enc_dec_4096_valid() {
+            let mut pke = ElGamal4096::new_4096_with_ame(16, 64, 64);
+            let (sk, pk) = pke.r#gen();
+            let (ak, t_map) = pke.a_gen();
+            let m = U4096::from_u8(5);
+            let cm = 4;
+
+            let (c1, c2) = pke
+                .a_enc(ak, pk, m, cm)
+                .expect("Should be able to encrypt with AME");
+
+            let m_dec = pke.dec(sk, (c1, c2));
+            assert_eq!(m, m_dec);
+
+            let cm_dec = pke
+                .a_dec((c1, c2), ak, &t_map)
+                .expect("Should be able to decrypt with AME");
+            assert_eq!(cm, cm_dec);
+        }
     }
 }
