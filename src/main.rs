@@ -65,10 +65,9 @@ fn run<const LIMBS: usize, MOD: crypto_bigint::modular::ConstMontyParams<LIMBS>>
         Mode::Enc { pk, m } => {
             // TODO: Parse these without panicking
             let pk = Uint::<LIMBS>::from_be_hex(pk.as_str());
-            let m =
-                Uint::<LIMBS>::from_be_hex(format!("{:0>width$}", m, width = LIMBS * 16).as_str());
+            println!("{}", m);
 
-            if let Some((c1, c2)) = pke.enc(pk, m) {
+            if let Some((c1, c2)) = pke.enc_str(pk, m) {
                 println!("c1: {}", c1);
                 println!("c2: {}", c2);
             } else {
@@ -80,7 +79,9 @@ fn run<const LIMBS: usize, MOD: crypto_bigint::modular::ConstMontyParams<LIMBS>>
             let c1 = Uint::<LIMBS>::from_be_hex(c1.as_str());
             let c2 = Uint::<LIMBS>::from_be_hex(c2.as_str());
 
-            let m = pke.dec(sk, (c1, c2));
+            let m = pke
+                .dec_str(sk, (c1, c2))
+                .ok_or("failed to decode to string")?;
             println!("m: {}", m);
         }
     }
