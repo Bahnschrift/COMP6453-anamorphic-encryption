@@ -29,6 +29,17 @@ enum Size {
 
 #[derive(Subcommand, Debug, Clone)]
 enum Mode {
+    /// Normal ElGamal PKE
+    #[command(subcommand, alias = "n")]
+    Normal(NormalOp),
+
+    /// Anamorphic ElGamal PKE
+    #[command(subcommand, alias = "a")]
+    Anam(AnamOp),
+}
+
+#[derive(Subcommand, Debug, Clone)]
+enum NormalOp {
     /// Generate public / secret key pair.
     Gen {},
     /// Encode some message using a public key.
@@ -52,17 +63,34 @@ enum Mode {
     },
 }
 
+#[derive(Subcommand, Debug, Clone)]
+enum AnamOp {
+    /// Generate public / secret / double key triplet.
+    Gen {},
+    // TODO: The rest of these
+}
+
 fn run<const LIMBS: usize, MOD: crypto_bigint::modular::ConstMontyParams<LIMBS>>(
-    mut pke: ElGamalPKE<LIMBS, MOD>,
+    pke: &mut ElGamalPKE<LIMBS, MOD>,
     mode: &Mode,
 ) -> Result<(), Box<dyn std::error::Error>> {
     match mode {
-        Mode::Gen {} => {
+        Mode::Normal(op) => run_normal(pke, op),
+        Mode::Anam(op) => run_anam(pke, op),
+    }
+}
+
+fn run_normal<const LIMBS: usize, MOD: crypto_bigint::modular::ConstMontyParams<LIMBS>>(
+    pke: &mut ElGamalPKE<LIMBS, MOD>,
+    op: &NormalOp,
+) -> Result<(), Box<dyn std::error::Error>> {
+    match op {
+        NormalOp::Gen {} => {
             let (sk, pk) = pke.r#gen();
             println!("pk: {}", pk);
             println!("sk: {}", sk);
         }
-        Mode::Enc { pk, m } => {
+        NormalOp::Enc { pk, m } => {
             // TODO: Parse these without panicking
             let pk = Uint::<LIMBS>::from_be_hex(pk.as_str());
             let m =
@@ -75,7 +103,7 @@ fn run<const LIMBS: usize, MOD: crypto_bigint::modular::ConstMontyParams<LIMBS>>
                 eprintln!("The message is not in the message space.");
             }
         }
-        Mode::Dec { sk, c1, c2 } => {
+        NormalOp::Dec { sk, c1, c2 } => {
             let sk = Uint::<LIMBS>::from_be_hex(sk.as_str());
             let c1 = Uint::<LIMBS>::from_be_hex(c1.as_str());
             let c2 = Uint::<LIMBS>::from_be_hex(c2.as_str());
@@ -88,15 +116,50 @@ fn run<const LIMBS: usize, MOD: crypto_bigint::modular::ConstMontyParams<LIMBS>>
     Ok(())
 }
 
+fn run_anam<const LIMBS: usize, MOD: crypto_bigint::modular::ConstMontyParams<LIMBS>>(
+    pke: &mut ElGamalPKE<LIMBS, MOD>,
+    op: &AnamOp,
+) -> Result<(), Box<dyn std::error::Error>> {
+    match op {
+        AnamOp::Gen {} => todo!(),
+    }
+
+    Ok(())
+}
+
 // This return type just means that we propagate errors from any result type up
 // to main by using the ? operator.
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = Args::parse();
 
     match args.size {
-        Size::Tiny => run(ElGamalPKE::new_tiny(), &args.mode),
-        Size::Small => run(ElGamalPKE::new_2048(), &args.mode),
-        Size::Medium => run(ElGamalPKE::new_3072(), &args.mode),
-        Size::Large => run(ElGamalPKE::new_4096(), &args.mode),
+        Size::Tiny => run(
+            &mut match args.mode {
+                Mode::Normal(_) => ElGamalPKE::new_tiny(),
+                Mode::Anam(_) => ElGamalPKE::new_tiny_with_ame(4, 1, 1), // TODO: How do we choose these?
+            },
+            &args.mode,
+        ),
+        Size::Small => run(
+            &mut match args.mode {
+                Mode::Normal(_) => ElGamalPKE::new_2048(),
+                Mode::Anam(_) => ElGamalPKE::new_2048_with_ame(16, 64, 64), // TODO: How do we choose these?
+            },
+            &args.mode,
+        ),
+        Size::Medium => run(
+            &mut match args.mode {
+                Mode::Normal(_) => ElGamalPKE::new_3072(),
+                Mode::Anam(_) => ElGamalPKE::new_3072_with_ame(16, 64, 64), // TODO: How do we choose these?
+            },
+            &args.mode,
+        ),
+        Size::Large => run(
+            &mut match args.mode {
+                Mode::Normal(_) => ElGamalPKE::new_4096(),
+                Mode::Anam(_) => ElGamalPKE::new_4096_with_ame(16, 64, 64), // TODO: How do we choose these?
+            },
+            &args.mode,
+        ),
     }
 }
