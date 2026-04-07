@@ -299,6 +299,12 @@ impl<const LIMBS: usize, MOD: ConstMontyParams<LIMBS>> ElGamalPKE<LIMBS, MOD> {
         }
 
         let ap = self.ap.as_ref().unwrap();
+
+        if cm >= ap.l {
+            // Hidden message too large
+            return None;
+        }
+
         let pk = ConstMontyForm::<MOD, LIMBS>::new(&pk);
 
         // reject sampling
