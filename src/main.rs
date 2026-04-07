@@ -30,11 +30,11 @@ enum Size {
 #[derive(Subcommand, Debug, Clone)]
 enum Mode {
     /// Normal ElGamal PKE
-    #[command(subcommand, alias = "n")]
+    #[command(subcommand, aliases = ["n", "norm"])]
     Normal(NormalOp),
 
     /// Anamorphic ElGamal PKE
-    #[command(subcommand, alias = "a")]
+    #[command(subcommand, aliases = ["a", "anamorphic"])]
     Anam(AnamOp),
 }
 
