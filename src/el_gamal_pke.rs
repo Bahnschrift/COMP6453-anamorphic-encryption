@@ -1,7 +1,7 @@
 // This follows construction 5 from the paper
 
 use crypto_bigint::{
-    NonZero, RandomMod, Uint,
+    BitOps, NonZero, RandomMod, Uint,
     modular::{ConstMontyForm, ConstMontyParams},
 };
 use rand::{RngExt, SeedableRng, rngs::ChaCha20Rng};
@@ -150,7 +150,11 @@ impl<const LIMBS: usize, MOD: ConstMontyParams<LIMBS>> ElGamalPKE<LIMBS, MOD> {
     }
 
     pub fn bigint_to_ascii(n: Uint<LIMBS>) -> Result<String, Box<dyn std::error::Error>> {
-        Ok(str::from_utf8(n.to_le_bytes().as_ref())?.to_string())
+        Ok(str::from_utf8(
+            n.to_le_bytes()[..(((n.bits_precision() - n.leading_zeros()) / 8 + 1) as usize)]
+                .as_ref(),
+        )?
+        .to_string())
     }
 
     /// Generates the `(pk, sk)` tuple.
@@ -397,5 +401,17 @@ mod test {
                 assert_eq!(m, m_dec);
             }
         }
+    }
+
+    #[test]
+    fn enc_dec_2048_str_1() {
+        let mut pke = ElGamalPKE::new_2048();
+        let (sk, pk) = pke.r#gen();
+
+        let m = "spongebob big guy pants ok";
+        let (c1, c2) = pke.enc_str(pk, m).expect("failed to encode string");
+
+        let m_dec = pke.dec_str(sk, (c1, c2)).expect("failed to decode string");
+        assert_eq!(m, m_dec);
     }
 }
