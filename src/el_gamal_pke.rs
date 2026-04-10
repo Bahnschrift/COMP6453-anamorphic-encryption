@@ -4,7 +4,10 @@ use crypto_bigint::{
     NonZero, RandomMod, Uint,
     modular::{ConstMontyForm, ConstMontyParams},
 };
-use rand::{RngExt, SeedableRng, rngs::ChaCha20Rng};
+use rand::{Rng, RngExt, SeedableRng, rngs::ChaCha20Rng};
+use rayon::prelude::*;
+use sha2::{Digest, Sha256};
+use std::collections::HashMap;
 
 // Packaging these into a module so I can just collapse them in my editor
 #[allow(dead_code)] // Disables warnings just for the consts module
@@ -36,6 +39,20 @@ mod consts {
     pub(super) const G4096: u8 = 2;
 }
 
+/// Params used in AME
+/// We will not want these numbers to be too large or enc/dec will be painfully slow, u32 should be sufficient
+#[derive(Debug)]
+pub struct AnamParams {
+    /// The maxium length of the hidden message, we will generate a hash table of the same size
+    pub l: u32,
+    /// Search space of x
+    pub s: u32,
+    /// Search space of y
+    pub t: u32,
+}
+
+pub type AnamKey = [u8; 32];
+
 // There's quite a lot to unpack here...
 //
 // The crate we're using, crypto_bigint, gives us a bunch of types for storing very large integers (U256, U512, etc.).
@@ -52,19 +69,39 @@ pub struct ElGamalPKE<const LIMBS: usize, MOD: ConstMontyParams<LIMBS>> {
     rng: ChaCha20Rng,
     q: NonZero<Uint<LIMBS>>,
     g: ConstMontyForm<MOD, LIMBS>,
+    // AME params
+    /// The maxium length of the hidden message
+    ap: Option<AnamParams>,
 }
 
 // A helper macro for defining preset prime / generator / order tuples
 macro_rules! el_gamal_impl {
-    ($t:ident, $modt:ident, $newfn:ident, $limbs:expr, $pstr:expr, $qstr: expr, $g:expr $(,)?) => {
+    (
+        $modt:ident,
+        $newfn:ident,
+        $limbs:expr,
+        $pstr:expr,
+        $qstr: expr,
+        $g:expr $(,)?,
+        $new_ame_fn:ident
+    ) => {
         crypto_bigint::const_prime_monty_params!($modt, crypto_bigint::Uint<$limbs>, $pstr, $g);
-        pub type $t = ElGamalPKE<$limbs, $modt>;
 
-        impl $t {
+        impl ElGamalPKE<$limbs, $modt> {
             pub fn $newfn() -> Self {
                 Self::new(
                     NonZero::<Uint<$limbs>>::new_unwrap(Uint::<$limbs>::from_be_hex($qstr)),
                     Uint::<$limbs>::from_u64($g),
+                )
+            }
+
+            pub fn $new_ame_fn(l: u32, s: u32, t: u32) -> Self {
+                Self::new_with_ame(
+                    NonZero::<Uint<$limbs>>::new_unwrap(Uint::<$limbs>::from_be_hex($qstr)),
+                    Uint::<$limbs>::from_u64($g),
+                    l,
+                    s,
+                    t,
                 )
             }
         }
@@ -72,40 +109,40 @@ macro_rules! el_gamal_impl {
 }
 
 el_gamal_impl!(
-    ElGamalTiny,
     ModPTiny,
     new_tiny,
     1,
     consts::PTINY_STR,
     consts::QTINY_STR,
-    2
+    2,
+    new_tiny_with_ame
 );
 el_gamal_impl!(
-    ElGamal2048,
     ModP2048,
     new_2048,
     32,
     consts::P2048_STR,
     consts::Q2048_STR,
-    2
+    2,
+    new_2048_with_ame
 );
 el_gamal_impl!(
-    ElGamal3072,
     ModP3072,
     new_3072,
     48,
     consts::P3072_STR,
     consts::Q3072_STR,
-    2
+    2,
+    new_3072_with_ame
 );
 el_gamal_impl!(
-    ElGamal4096,
     ModP4096,
     new_4096,
     64,
     consts::P4096_STR,
     consts::Q4096_STR,
-    2
+    2,
+    new_4096_with_ame
 );
 
 impl<const LIMBS: usize, MOD: ConstMontyParams<LIMBS>> ElGamalPKE<LIMBS, MOD> {
@@ -120,12 +157,22 @@ impl<const LIMBS: usize, MOD: ConstMontyParams<LIMBS>> ElGamalPKE<LIMBS, MOD> {
         Self::new_seeded(q, g, rand::rng().random())
     }
 
+    pub fn new_with_ame(q: NonZero<Uint<LIMBS>>, g: Uint<LIMBS>, l: u32, s: u32, t: u32) -> Self {
+        Self {
+            rng: ChaCha20Rng::seed_from_u64(rand::rng().random()),
+            q,
+            g: ConstMontyForm::<MOD, LIMBS>::new(&g),
+            ap: Some(AnamParams { l, s, t }),
+        }
+    }
+
     pub fn new_seeded(q: NonZero<Uint<LIMBS>>, g: Uint<LIMBS>, seed: u64) -> Self {
         Self {
             // ChaCha20 is theoretically cryptographically secure.
             rng: ChaCha20Rng::seed_from_u64(seed),
             q,
             g: ConstMontyForm::<MOD, LIMBS>::new(&g),
+            ap: None,
         }
     }
 
@@ -187,6 +234,125 @@ impl<const LIMBS: usize, MOD: ConstMontyParams<LIMBS>> ElGamalPKE<LIMBS, MOD> {
         (c1 * c2.pow(&sk).invert().expect("Failed to invert")).retrieve()
     }
 
+    /// Something work like a PRF, predictable by the reciever (F in python version)
+    fn anam_rng(&self, ak: AnamKey, x: u32, y: u32) -> Uint<LIMBS> {
+        let mut hasher = Sha256::new();
+        hasher.update(&ak);
+        hasher.update(&x.to_le_bytes());
+        hasher.update(&y.to_le_bytes());
+
+        let seed: AnamKey = hasher.finalize().into();
+
+        let mut rng = ChaCha20Rng::from_seed(seed);
+        Uint::<LIMBS>::random_mod_vartime(&mut rng, &self.q)
+    }
+
+    /// d in python version
+    /// Extracts the feature from c2 that the receiver can use to check if they have found the correct y
+    /// Take the lowest 32 bits from c2 and mod it by t, avoiding big int operations
+    fn anam_extract_feature(c2: &Uint<LIMBS>, t: u32) -> u32 {
+        let bytes = c2.to_le_bytes();
+        let mut buf = [0u8; 4];
+        buf.copy_from_slice(&bytes[0..4]);
+
+        let low_u32 = u32::from_le_bytes(buf);
+        low_u32 % t
+    }
+
+    /// Generates the anamorphic symmetric key and a hash table (K and T in the python version)
+    pub fn a_gen(&mut self) -> (AnamKey, HashMap<Uint<LIMBS>, u32>) {
+        // The anamorphic symmetric key, 32 random bytes
+        let mut ak = [0u8; 32];
+        self.rng.fill(ak.as_mut_slice());
+
+        // The lookup table for the receiver to check if they have found the correct y
+        let mut t = HashMap::<Uint<LIMBS>, u32>::new();
+
+        let l = self.ap.as_ref().unwrap().l;
+        // Retrive all possible hidden messages
+        let mut current_g = ConstMontyForm::<MOD, LIMBS>::ONE;
+        for i in 0..l {
+            t.insert(current_g.retrieve(), i);
+            current_g = current_g.mul(&self.g);
+        }
+
+        (ak, t)
+    }
+
+    /// Encrypt a single block with the anamorphic encryption scheme
+    pub fn a_enc(
+        &mut self,
+        ak: AnamKey,
+        pk: Uint<LIMBS>,
+        m: Uint<LIMBS>,
+        cm: u32,
+    ) -> Option<(Uint<LIMBS>, Uint<LIMBS>)> {
+        if m == Uint::<LIMBS>::ZERO || m >= Self::p() {
+            // Message outside of message space.
+            return None;
+        }
+
+        let m = ConstMontyForm::<MOD, LIMBS>::new(&m);
+        if m.pow(&self.q) != ConstMontyForm::<MOD, LIMBS>::ONE {
+            // Message not in subgroup generated by g
+            return None;
+        }
+
+        let ap = self.ap.as_ref().unwrap();
+
+        if cm >= ap.l {
+            // Hidden message too large
+            return None;
+        }
+
+        let pk = ConstMontyForm::<MOD, LIMBS>::new(&pk);
+
+        // reject sampling
+        loop {
+            let x = self.rng.next_u32() % ap.s;
+            let y = self.rng.next_u32() % ap.t;
+
+            let t_offset = self.anam_rng(ak, x, y);
+            // Hide the hidden message cm in the "random number" r
+            let r = t_offset.add_mod(&Uint::<LIMBS>::from_u32(cm), &self.q);
+
+            let c2 = self.g.pow(&r).retrieve();
+            let feature = Self::anam_extract_feature(&c2, ap.t);
+            if feature == y {
+                let c1 = m.mul(&pk.pow(&r)).retrieve();
+                return Some((c1, c2));
+            }
+        }
+    }
+
+    /// Decrypts a single block encrypted with the anamorphic encryption scheme
+    /// Notice that this function only gives the hidden message
+    /// Use the normal dec function to retrieve the original message if needed
+    fn a_dec(
+        &self,
+        (_c1, c2): (Uint<LIMBS>, Uint<LIMBS>),
+        ak: AnamKey,
+        t_map: &HashMap<Uint<LIMBS>, u32>,
+    ) -> Option<u32> {
+        let ap = self.ap.as_ref().unwrap();
+        let y = Self::anam_extract_feature(&c2, ap.t);
+        let c2 = ConstMontyForm::<MOD, LIMBS>::new(&c2);
+
+        let result = (0..ap.s).into_par_iter().find_map_any(|x| {
+            let t = self.anam_rng(ak, x, y);
+            let t_neg = self.q.wrapping_sub(&t);
+            let s_val = c2.mul(&self.g.pow(&t_neg)).retrieve();
+
+            if t_map.contains_key(&s_val) {
+                Some(t_map[&s_val])
+            } else {
+                None
+            }
+        });
+
+        result
+    }
+
     /// Converts some i in [1, q] to it's corresponding integer that is a member of G.
     /// This allows us to map Z_q (kind of) to G, which makes encoding messages a lot easier,
     /// since now the message space can be treated as Z_q instead of G (which has lots of gaps).
@@ -233,7 +399,7 @@ impl<const LIMBS: usize, MOD: ConstMontyParams<LIMBS>> ElGamalPKE<LIMBS, MOD> {
 
 // Test functions in here can be run automatically with `cargo test`.
 #[cfg(test)]
-mod test {
+mod tests {
     use crypto_bigint::{U64, U2048, U3072, U4096};
 
     use crate::el_gamal_pke::{
@@ -241,120 +407,218 @@ mod test {
         consts::{P2048_STR, P3072_STR, P4096_STR, Q2048_STR, Q3072_STR, Q4096_STR},
     };
 
-    #[test]
-    fn verify_q_2048() {
-        assert_eq!(
-            U2048::from_be_hex(Q2048_STR),
-            (U2048::from_be_hex(P2048_STR) - U2048::ONE) / U2048::from_u8(2)
-        );
+    /// General tests
+    mod general {
+        use super::*;
+
+        // Verifies p = 2 * q + 1
+        #[test]
+        fn verify_q_2048() {
+            assert_eq!(
+                U2048::from_be_hex(Q2048_STR),
+                (U2048::from_be_hex(P2048_STR) - U2048::ONE) / U2048::from_u8(2)
+            );
+        }
+
+        #[test]
+        fn verify_q_3072() {
+            assert_eq!(
+                U3072::from_be_hex(Q3072_STR),
+                (U3072::from_be_hex(P3072_STR) - U3072::ONE) / U3072::from_u8(2)
+            );
+        }
+
+        #[test]
+        fn verify_q_4096() {
+            assert_eq!(
+                U4096::from_be_hex(Q4096_STR),
+                (U4096::from_be_hex(P4096_STR) - U4096::ONE) / U4096::from_u8(2)
+            );
+        }
     }
 
-    #[test]
-    fn verify_q_3072() {
-        assert_eq!(
-            U3072::from_be_hex(Q3072_STR),
-            (U3072::from_be_hex(P3072_STR) - U3072::ONE) / U3072::from_u8(2)
-        );
-    }
+    mod normal {
+        use super::*;
 
-    #[test]
-    fn verify_q_4096() {
-        assert_eq!(
-            U4096::from_be_hex(Q4096_STR),
-            (U4096::from_be_hex(P4096_STR) - U4096::ONE) / U4096::from_u8(2)
-        );
-    }
+        #[test]
+        fn enc_dec_2048_valid_1() {
+            let mut pke = ElGamalPKE::new_2048();
+            let (sk, pk) = pke.r#gen();
 
-    #[test]
-    fn enc_dec_2048_valid_1() {
-        let mut pke = ElGamalPKE::new_2048();
-        let (sk, pk) = pke.r#gen();
+            let m = U2048::from_u8(5);
+            let (c1, c2) = pke.enc(pk, m).expect("m should be in subgroup");
 
-        let m = U2048::from_u8(5);
-        let (c1, c2) = pke.enc(pk, m).expect("m should be in subgroup");
+            let m_dec = pke.dec(sk, (c1, c2));
+            assert_eq!(m, m_dec);
+        }
+        #[test]
+        fn enc_dec_2048_valid_2() {
+            let mut pke = ElGamalPKE::new_2048();
+            let (sk, pk) = pke.r#gen();
 
-        let m_dec = pke.dec(sk, (c1, c2));
-        assert_eq!(m, m_dec);
-    }
-    #[test]
-    fn enc_dec_2048_valid_2() {
-        let mut pke = ElGamalPKE::new_2048();
-        let (sk, pk) = pke.r#gen();
+            let m = U2048::from_u8(2);
+            let (c1, c2) = pke.enc(pk, m).expect("m should be in subgroup");
 
-        let m = U2048::from_u8(2);
-        let (c1, c2) = pke.enc(pk, m).expect("m should be in subgroup");
+            let m_dec = pke.dec(sk, (c1, c2));
+            assert_eq!(m, m_dec);
+        }
 
-        let m_dec = pke.dec(sk, (c1, c2));
-        assert_eq!(m, m_dec);
-    }
+        #[test]
+        fn enc_dec_2048_valid_3() {
+            let mut pke = ElGamalPKE::new_2048();
+            let (sk, pk) = pke.r#gen();
 
-    #[test]
-    fn enc_dec_2048_valid_3() {
-        let mut pke = ElGamalPKE::new_2048();
-        let (sk, pk) = pke.r#gen();
+            let m = U2048::from_u64(129836918726312);
+            let (c1, c2) = pke.enc(pk, m).expect("m should be in subgroup");
 
-        let m = U2048::from_u64(129836918726312);
-        let (c1, c2) = pke.enc(pk, m).expect("m should be in subgroup");
+            let m_dec = pke.dec(sk, (c1, c2));
+            assert_eq!(m, m_dec);
+        }
 
-        let m_dec = pke.dec(sk, (c1, c2));
-        assert_eq!(m, m_dec);
-    }
+        #[test]
+        fn enc_dec_4096_valid_1() {
+            let mut pke = ElGamalPKE::new_4096();
+            let (sk, pk) = pke.r#gen();
 
-    #[test]
-    fn enc_dec_4096_valid_1() {
-        let mut pke = ElGamalPKE::new_4096();
-        let (sk, pk) = pke.r#gen();
+            let m = U4096::from_u8(5);
+            let (c1, c2) = pke.enc(pk, m).expect("m should be in subgroup");
 
-        let m = U4096::from_u8(5);
-        let (c1, c2) = pke.enc(pk, m).expect("m should be in subgroup");
+            let m_dec = pke.dec(sk, (c1, c2));
+            assert_eq!(m, m_dec);
+        }
 
-        let m_dec = pke.dec(sk, (c1, c2));
-        assert_eq!(m, m_dec);
-    }
+        #[test]
+        fn enc_dec_4096_valid_2() {
+            let mut pke = ElGamalPKE::new_4096();
+            let (sk, pk) = pke.r#gen();
 
-    #[test]
-    fn enc_dec_4096_valid_2() {
-        let mut pke = ElGamalPKE::new_4096();
-        let (sk, pk) = pke.r#gen();
+            let m = U4096::from_u8(2);
+            let (c1, c2) = pke.enc(pk, m).expect("m should be in subgroup");
 
-        let m = U4096::from_u8(2);
-        let (c1, c2) = pke.enc(pk, m).expect("m should be in subgroup");
+            let m_dec = pke.dec(sk, (c1, c2));
+            assert_eq!(m, m_dec);
+        }
 
-        let m_dec = pke.dec(sk, (c1, c2));
-        assert_eq!(m, m_dec);
-    }
+        #[test]
+        fn enc_dec_4096_valid_3() {
+            let mut pke = ElGamalPKE::new_4096();
+            let (sk, pk) = pke.r#gen();
 
-    #[test]
-    fn enc_dec_4096_valid_3() {
-        let mut pke = ElGamalPKE::new_4096();
-        let (sk, pk) = pke.r#gen();
+            let m = U4096::from_u64(129836918726312);
+            let (c1, c2) = pke.enc(pk, m).expect("m should be in subgroup");
 
-        let m = U4096::from_u64(129836918726312);
-        let (c1, c2) = pke.enc(pk, m).expect("m should be in subgroup");
+            let m_dec = pke.dec(sk, (c1, c2));
+            assert_eq!(m, m_dec);
+        }
 
-        let m_dec = pke.dec(sk, (c1, c2));
-        assert_eq!(m, m_dec);
-    }
+        const SMALL_PKE_MESSAGE_SPACE: [u8; 11] = [1, 2, 3, 4, 6, 8, 9, 12, 13, 16, 18];
 
-    const SMALL_PKE_MESSAGE_SPACE: [u8; 11] = [1, 2, 3, 4, 6, 8, 9, 12, 13, 16, 18];
+        // Validates that all appropriate messages are accepted / rejected.
+        #[test]
+        fn test_small() {
+            let mut pke = ElGamalPKE::new_tiny();
 
-    // Validates that all appropriate messages are accepted / rejected.
-    #[test]
-    fn test_small() {
-        let mut pke = ElGamalPKE::new_tiny();
+            let (sk, pk) = pke.r#gen();
 
-        let (sk, pk) = pke.r#gen();
+            for i in 0..=23 {
+                let m = U64::from_u8(i);
 
-        for i in 0..=23 {
-            let m = U64::from_u8(i);
-
-            let c = pke.enc(pk, m);
-            if !SMALL_PKE_MESSAGE_SPACE.contains(&i) {
-                assert_eq!(c, None);
-            } else {
-                let m_dec = pke.dec(sk, c.expect("m should be in subgroup"));
-                assert_eq!(m, m_dec);
+                let c = pke.enc(pk, m);
+                if !SMALL_PKE_MESSAGE_SPACE.contains(&i) {
+                    assert_eq!(c, None);
+                } else {
+                    let m_dec = pke.dec(sk, c.expect("m should be in subgroup"));
+                    assert_eq!(m, m_dec);
+                }
             }
+        }
+    }
+
+    mod anamorphic {
+        use super::*;
+
+        #[test]
+        fn test_anam_enc_dec_tiny_valid() {
+            let mut pke = ElGamalPKE::new_tiny_with_ame(4, 1, 1);
+            let (sk, pk) = pke.r#gen();
+            let (ak, t_map) = pke.a_gen();
+            let m = U64::from_u8(3);
+            let cm = 1;
+
+            let (c1, c2) = pke
+                .a_enc(ak, pk, m, cm)
+                .expect("Should be able to encrypt with AME");
+
+            let m_dec = pke.dec(sk, (c1, c2));
+            assert_eq!(m, m_dec);
+
+            let cm_dec = pke
+                .a_dec((c1, c2), ak, &t_map)
+                .expect("Should be able to decrypt with AME");
+            assert_eq!(cm, cm_dec);
+        }
+
+        #[test]
+        fn test_anam_enc_dec_2048_valid() {
+            let mut pke = ElGamalPKE::new_2048_with_ame(16, 64, 64);
+            let (sk, pk) = pke.r#gen();
+            let (ak, t_map) = pke.a_gen();
+            let m = U2048::from_u8(5);
+            let cm = 4;
+
+            let (c1, c2) = pke
+                .a_enc(ak, pk, m, cm)
+                .expect("Should be able to encrypt with AME");
+
+            let m_dec = pke.dec(sk, (c1, c2));
+            assert_eq!(m, m_dec);
+
+            let cm_dec = pke
+                .a_dec((c1, c2), ak, &t_map)
+                .expect("Should be able to decrypt with AME");
+            assert_eq!(cm, cm_dec);
+        }
+
+        #[test]
+        fn test_anam_enc_dec_3072_valid() {
+            let mut pke = ElGamalPKE::new_3072_with_ame(16, 64, 64);
+            let (sk, pk) = pke.r#gen();
+            let (ak, t_map) = pke.a_gen();
+            let m = U3072::from_u8(4);
+            let cm = 4;
+
+            let (c1, c2) = pke
+                .a_enc(ak, pk, m, cm)
+                .expect("Should be able to encrypt with AME");
+
+            let m_dec = pke.dec(sk, (c1, c2));
+            assert_eq!(m, m_dec);
+
+            let cm_dec = pke
+                .a_dec((c1, c2), ak, &t_map)
+                .expect("Should be able to decrypt with AME");
+            assert_eq!(cm, cm_dec);
+        }
+
+        #[test]
+        fn test_anam_enc_dec_4096_valid() {
+            let mut pke = ElGamalPKE::new_4096_with_ame(16, 64, 64);
+            let (sk, pk) = pke.r#gen();
+            let (ak, t_map) = pke.a_gen();
+            let m = U4096::from_u8(5);
+            let cm = 4;
+
+            let (c1, c2) = pke
+                .a_enc(ak, pk, m, cm)
+                .expect("Should be able to encrypt with AME");
+
+            let m_dec = pke.dec(sk, (c1, c2));
+            assert_eq!(m, m_dec);
+
+            let cm_dec = pke
+                .a_dec((c1, c2), ak, &t_map)
+                .expect("Should be able to decrypt with AME");
+            assert_eq!(cm, cm_dec);
         }
     }
 }
