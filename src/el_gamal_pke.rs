@@ -1,7 +1,7 @@
 // This follows construction 5 from the paper
 
 use crypto_bigint::{
-    NonZero, RandomMod, Uint,
+    BitOps, NonZero, RandomMod, Uint,
     modular::{ConstMontyForm, ConstMontyParams},
 };
 use rand::{Rng, RngExt, SeedableRng, rngs::ChaCha20Rng};
@@ -181,6 +181,29 @@ impl<const LIMBS: usize, MOD: ConstMontyParams<LIMBS>> ElGamalPKE<LIMBS, MOD> {
         *MOD::PARAMS.modulus().as_ref()
     }
 
+    pub fn ascii_to_bigint(s: &str) -> Result<Uint<LIMBS>, Box<dyn std::error::Error>> {
+        if s.len() > LIMBS * 8 {
+            return Err("too long".into());
+        }
+        Ok(Uint::<LIMBS>::from_le_slice(
+            s.as_bytes()
+                .iter()
+                .chain(std::iter::repeat(&0u8))
+                .take(LIMBS * 8)
+                .cloned()
+                .collect::<Vec<u8>>()
+                .as_slice(),
+        ))
+    }
+
+    pub fn bigint_to_ascii(n: Uint<LIMBS>) -> Result<String, Box<dyn std::error::Error>> {
+        Ok(str::from_utf8(
+            n.to_le_bytes()[..(((n.bits_precision() - n.leading_zeros()) / 8 + 1) as usize)]
+                .as_ref(),
+        )?
+        .to_string())
+    }
+
     /// Generates the `(pk, sk)` tuple.
     // gen is a reserved keyword in rust. We bypass this by using the r# syntax.
     //
@@ -226,12 +249,34 @@ impl<const LIMBS: usize, MOD: ConstMontyParams<LIMBS>> ElGamalPKE<LIMBS, MOD> {
         Some((c1.retrieve(), c2.retrieve()))
     }
 
+    pub fn enc_modq(
+        &mut self,
+        pk: Uint<LIMBS>,
+        m: Uint<LIMBS>,
+    ) -> Option<(Uint<LIMBS>, Uint<LIMBS>)> {
+        let m_modq = self.modq_to_message(m).retrieve();
+        self.enc(pk, m_modq)
+    }
+
+    pub fn enc_str(&mut self, pk: Uint<LIMBS>, m: &str) -> Option<(Uint<LIMBS>, Uint<LIMBS>)> {
+        self.enc_modq(pk, Self::ascii_to_bigint(m).ok()?)
+    }
+
     /// Uses the secret key `sk` to decode some ciphertext `(c1, c2)`.
     // Need to find some way to get the modulo multiplicative inverse
     pub fn dec(&self, sk: Uint<LIMBS>, (c1, c2): (Uint<LIMBS>, Uint<LIMBS>)) -> Uint<LIMBS> {
         let c1 = ConstMontyForm::<MOD, LIMBS>::new(&c1);
         let c2 = ConstMontyForm::<MOD, LIMBS>::new(&c2);
         (c1 * c2.pow(&sk).invert().expect("Failed to invert")).retrieve()
+    }
+
+    pub fn dec_modq(&self, sk: Uint<LIMBS>, (c1, c2): (Uint<LIMBS>, Uint<LIMBS>)) -> Uint<LIMBS> {
+        let dec = self.dec(sk, (c1, c2));
+        self.message_to_modq(ConstMontyForm::<MOD, LIMBS>::new(&dec))
+    }
+
+    pub fn dec_str(&self, sk: Uint<LIMBS>, (c1, c2): (Uint<LIMBS>, Uint<LIMBS>)) -> Option<String> {
+        Self::bigint_to_ascii(self.dec_modq(sk, (c1, c2))).ok()
     }
 
     /// Something work like a PRF, predictable by the reciever (F in python version)
@@ -531,6 +576,18 @@ mod tests {
                     assert_eq!(m, m_dec);
                 }
             }
+        }
+
+        #[test]
+        fn enc_dec_2048_str_1() {
+            let mut pke = ElGamalPKE::new_2048();
+            let (sk, pk) = pke.r#gen();
+
+            let m = "spongebob big guy pants ok";
+            let (c1, c2) = pke.enc_str(pk, m).expect("failed to encode string");
+
+            let m_dec = pke.dec_str(sk, (c1, c2)).expect("failed to decode string");
+            assert_eq!(m, m_dec);
         }
     }
 
