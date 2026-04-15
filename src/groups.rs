@@ -11,8 +11,12 @@ use crypto_bigint::{
 pub trait MultGroupParams<const LIMBS: usize> {
     type MOD: ConstMontyParams<LIMBS>;
 
-    fn q() -> NonZero<Uint<LIMBS>>;
-    fn g() -> ConstMontyForm<Self::MOD, LIMBS>;
+    fn q() -> NonZero<Uint<LIMBS>>
+    where
+        Self: Sized;
+    fn g() -> ConstMontyForm<Self::MOD, LIMBS>
+    where
+        Self: Sized;
 }
 
 macro_rules! new_group {
