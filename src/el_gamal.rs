@@ -43,7 +43,7 @@ impl<const LIMBS: usize, G: MCG<LIMBS>> PKE for ElGamal<LIMBS, G> {
         // sk = 0 is bad, because then c1 = m
         let sk = random_mod_lb(&mut self.rng, Uint::ONE, G::q());
         // This won't panic, since g^q is by definition in the group
-        let pk = G::into_group(G::g().pow(&sk)).unwrap();
+        let pk = G::from_modp(G::g().pow(&sk)).unwrap();
 
         (pk, sk)
     }
@@ -53,15 +53,15 @@ impl<const LIMBS: usize, G: MCG<LIMBS>> PKE for ElGamal<LIMBS, G> {
         let r = random_mod_lb(&mut self.rng, Uint::ONE, G::q());
 
         // This won't panic, since g^k * (g^a)^r = g^(k + a * r), which is in the group
-        let c1 = G::into_group(**m * pk.pow(&r)).unwrap();
+        let c1 = G::from_modp(**m * pk.pow(&r)).unwrap();
         // This won't panic, since this is the definition of being in the group
-        let c2 = G::into_group(G::g().pow(&r)).unwrap();
+        let c2 = G::from_modp(G::g().pow(&r)).unwrap();
 
         (c1, c2)
     }
 
     fn dec(&mut self, (c1, c2): &Self::C, sk: &Self::SK) -> Self::M {
-        G::into_group(**c1 * c2.pow(&sk).invert().unwrap()).unwrap()
+        G::from_modp(**c1 * c2.pow(&sk).invert().unwrap()).unwrap()
     }
 }
 
@@ -146,3 +146,74 @@ impl<const LIMBS: usize, G: MCG<LIMBS> + Clone> AnamorphicPKE<ElGamal<LIMBS, G>>
         todo!()
     }
 }
+
+#[cfg(test)]
+mod tests_normal {
+    use crate::{
+        groups::{Group2048, Group4096, GroupSmall},
+        helpers::{bigint_to_bytes, bytes_to_bigint},
+    };
+
+    use super::*;
+
+    #[test]
+    fn test_e2e_small() {
+        // The small group can only hold ascii < 87
+        let m = "!";
+        let mi = bytes_to_bigint(m.as_bytes()).unwrap();
+        let mg = GroupSmall::from_modq(mi).unwrap();
+
+        let mut eg = ElGamal::new();
+        let (pk, sk) = eg.r#gen();
+        let (c1, c2) = eg.enc(&mg, &pk);
+        let md = eg.dec(&(c1, c2), &sk);
+        let dec = String::from_utf8(bigint_to_bytes(md.to_modq())).unwrap();
+
+        assert_eq!(m, dec);
+    }
+
+    #[test]
+    fn test_e2e_2048() {
+        // Some bug with bigint_to_bytes means we can't use anything longer than this, even though we're definitely able to encode bigger strings
+        let m = "According to all known laws of aviation, there is no way that a bee should be able to fly. Its wings are too small to get its fat little body off the ground. The bee, of course, flies anyway because bees don't care what humans think is impossible.";
+        let mi = bytes_to_bigint(m.as_bytes()).unwrap();
+        let mg = Group2048::from_modq(mi).unwrap();
+
+        let mut eg = ElGamal::new();
+        let (pk, sk) = eg.r#gen();
+
+        let (c1, c2) = eg.enc(&mg, &pk);
+
+        let md = eg.dec(&(c1, c2), &sk);
+        let mdi = md.to_modq();
+        let mdb = bigint_to_bytes(mdi);
+        let dec = String::from_utf8(mdb).unwrap();
+
+        assert_eq!(m, dec);
+    }
+
+    #[test]
+    fn test_e2e_4096() {
+        // Same bug here...
+        let m = "According to all known laws of aviation, there is no way that a bee should be able to fly. Its wings are too small to get its fat little body off the ground. The bee, of course, flies anyway because bees don't care what humans think is impossible.";
+        let mi = bytes_to_bigint(m.as_bytes()).unwrap();
+        let mg = Group4096::from_modq(mi).unwrap();
+
+        let mut eg = ElGamal::new();
+        let (pk, sk) = eg.r#gen();
+
+        let (c1, c2) = eg.enc(&mg, &pk);
+
+        let md = eg.dec(&(c1, c2), &sk);
+        let mdi = md.to_modq();
+        let mdb = bigint_to_bytes(mdi);
+        let dec = String::from_utf8(mdb).unwrap();
+
+        assert_eq!(m, dec);
+    }
+}
+
+// #[cfg(test)]
+// mod tests_anamorphic {
+//     use super::*;
+// }
