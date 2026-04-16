@@ -37,7 +37,7 @@ pub trait MCG<const LIMBS: usize>: Deref<Target = ConstMontyForm<Self::MOD, LIMB
 
 macro_rules! new_group {
     ($name:ident, $mod_name:ident, $limbs:expr, $p:expr, $q:expr, $g:expr $(,)?) => {
-        #[derive(Debug, Clone, Copy)]
+        #[derive(Debug, Clone, Copy, PartialEq, Eq)]
         pub struct $name(ConstMontyForm<$mod_name, $limbs>);
 
         const_monty_params!($mod_name, Uint<$limbs>, $p);
