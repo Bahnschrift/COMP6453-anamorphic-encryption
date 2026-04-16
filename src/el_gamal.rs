@@ -75,6 +75,26 @@ pub struct ElGamalAnam<const LIMBS: usize, G: MCG<LIMBS>> {
     t: u32,
 }
 
+impl<const LIMBS: usize, G: MCG<LIMBS>> ElGamalAnam<LIMBS, G> {
+    pub fn new(l: u32, s: u32, t: u32) -> Self {
+        Self {
+            el_gamal: ElGamal::new(),
+            l,
+            s,
+            t,
+        }
+    }
+
+    pub fn new_seeded(seed: u64, l: u32, s: u32, t: u32) -> Self {
+        Self {
+            el_gamal: ElGamal::new_seeded(seed),
+            l,
+            s,
+            t,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct ElGamalDK<const LIMBS: usize, CM>
 where
