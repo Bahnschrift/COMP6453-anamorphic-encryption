@@ -138,7 +138,7 @@ impl<const LIMBS: usize, G: MCG<LIMBS> + Clone> AnamorphicPKE<ElGamal<LIMBS, G>>
         dk: &Self::DK,
         m: &<ElGamal<LIMBS, G> as PKE>::M,
         cm: &Self::CM,
-    ) -> Option<<ElGamal<LIMBS, G> as PKE>::M> {
+    ) -> Option<<ElGamal<LIMBS, G> as PKE>::C> {
         todo!()
     }
 
