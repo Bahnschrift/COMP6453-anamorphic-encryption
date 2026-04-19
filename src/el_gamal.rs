@@ -119,7 +119,7 @@ where
 
     /// A hashmap stores g^cm as key and cm as value
     ///
-    /// Upon decryption, we recover y with d(c2), then we retrieve the space of [0, s) to try each possible x.
+    /// Upon decryption, we recover y with d(c2), then we search the space of [0, s) to try each possible x.
     /// We can then compute offset = F(k, x, y), and check if c2 / g^offset = g^cm is in this table.
     /// If it is, then the x is correct, and we have found the covert message.
     ///
