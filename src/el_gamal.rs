@@ -123,7 +123,7 @@ where
     /// We can then compute offset = F(k, x, y), and check if c2 / g^offset = g^cm is in this table.
     /// If it is, then the x is correct, and we have found the covert message.
     ///
-    /// It is not necessarily a secret, but a receiver will need to calculate log_g(g^cm) and check if the result is an integer in [0, l) for up to s times to get cm without it
+    /// It is not necessarily a secret, but a receiver will need to generate it again from the parameters if it is not delivered with the key
     t: HashMap<Uint<LIMBS>, CM>,
 }
 
