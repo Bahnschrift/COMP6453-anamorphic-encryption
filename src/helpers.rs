@@ -30,6 +30,9 @@ pub(crate) fn random_mod_lb<const LIMBS: usize, R: Rng + ?Sized>(
 /// # Examples
 ///
 /// ```
+/// use anamorphic_encryption::helpers::{bigint_to_bytes, bytes_to_bigint};
+/// use crypto_bigint::U256;
+///
 /// let s = "incredible string";
 /// let e: U256 = bytes_to_bigint(s.as_bytes()).expect("Should fit in a 256 bit int");
 /// let d = String::from_utf8(bigint_to_bytes(e)).unwrap();
