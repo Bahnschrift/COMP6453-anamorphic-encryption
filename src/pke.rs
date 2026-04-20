@@ -40,7 +40,7 @@ pub trait AnamorphicPKE<P: PKE> {
     /// requiring `CM` to only contain valid values (and implement an
     /// iter method for `a_gen`), but that will probably make things more
     /// annoying than they need to be.
-    fn a_enc(&mut self, dk: &Self::DK, m: &P::M, cm: &Self::CM) -> Option<P::C>;
+    fn a_enc(&mut self, pk: &P::PK, dk: &Self::DK, m: &P::M, cm: &Self::CM) -> Option<P::C>;
 
     /// Anamorphic decryption.
     ///
