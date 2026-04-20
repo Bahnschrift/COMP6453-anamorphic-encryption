@@ -54,7 +54,6 @@ pub fn bytes_to_bigint<const LIMBS: usize>(s: &[u8]) -> Option<Uint<LIMBS>> {
 }
 
 /// Reverse of [bytes_to_bigint]
-// TODO: It seems like there's some sort of crash here somewhere.
 pub fn bigint_to_bytes<const LIMBS: usize>(n: Uint<LIMBS>) -> Vec<u8> {
     n.to_le_bytes()[..((n.bits_precision() - n.leading_zeros()).div_ceil(8)) as usize].to_vec()
 }
