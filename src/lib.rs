@@ -1,3 +1,4 @@
+pub mod cramer_shoup;
 pub mod el_gamal;
 pub mod groups;
 pub mod helpers;
