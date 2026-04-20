@@ -80,9 +80,10 @@ impl<const LIMBS: usize, G: MCG<LIMBS>> PKE for CramerShoup<LIMBS, G> {
         hasher.update(u1.as_montgomery().to_le_bytes());
         hasher.update(u2.as_montgomery().to_le_bytes());
         hasher.update(v.as_montgomery().to_le_bytes());
-        let h: Uint<LIMBS> = bytes_to_bigint(&hasher.finalize()).expect("hash bigger than LIMBS");
+        let h = bytes_to_bigint::<4>(&hasher.finalize()).expect("hash bigger than LIMBS");
+        let h = h.resize::<LIMBS>();
 
-        let w = G::from_modp(c.pow(&r) * d.pow(&(r * h))).unwrap();
+        let w = G::from_modp(c.pow(&r) * d.pow(&(r.mul_mod(&h, &G::q())))).unwrap();
 
         ((v, w), (u1, u2))
     }
@@ -95,9 +96,11 @@ impl<const LIMBS: usize, G: MCG<LIMBS>> PKE for CramerShoup<LIMBS, G> {
         hasher.update(u1.as_montgomery().to_le_bytes());
         hasher.update(u2.as_montgomery().to_le_bytes());
         hasher.update(v.as_montgomery().to_le_bytes());
-        let h: Uint<LIMBS> = bytes_to_bigint(&hasher.finalize()).expect("hash bigger than LIMBS");
+        let h = bytes_to_bigint::<4>(&hasher.finalize()).expect("hash bigger than LIMBS");
+        let h = h.resize::<LIMBS>();
 
-        let check = u1.pow(&((*x1 + y1) * h)) * u2.pow(&((*x2 + y2) * h));
+        let check = u1.pow(&(x1.add_mod(y1, &G::q()).mul_mod(&h, &G::q())))
+            * u2.pow(&(x2.add_mod(y2, &G::q()).mul_mod(&h, &G::q())));
 
         if check == **w {
             G::from_modp(**v * u1.invert().unwrap().pow(z)).unwrap()
