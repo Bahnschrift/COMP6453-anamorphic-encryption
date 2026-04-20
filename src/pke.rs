@@ -1,4 +1,8 @@
-/// Defines the functions required for standard public key encryption.
+/// Trait defining the functions and associated types required
+/// for public key encryption (PKE).
+///
+/// PKE consists of three functions: [`PKE::gen`], [`PKE::enc`], and [`PKE::dec`].
+/// See the documentation for each of these functions for more information.
 pub trait PKE {
     /// Public key
     type PK;
@@ -22,6 +26,18 @@ pub trait PKE {
     fn dec(&mut self, c: &Self::C, sk: &Self::SK) -> Self::M;
 }
 
+/// Trait defining the functions and associated types required
+/// for _anamorphic_ public key encryption (AnamPKE).
+///
+/// AnamorphicPKE is defined on top of an existing PKE scheme `P`,
+/// and thus requires it as a type parameter.
+///
+/// It allows you to, as well as the standard encoding of a ciphertext,
+/// embed an additional optional "covert message" within a ciphertext,
+/// only decodable by those with the "double key".
+///
+/// It augments this existing scheme with three additional functions:
+/// [`AnamorphicPKE::a_gen`], [`AnamorphicPKE::a_enc`], and [`AnamorphicPKE::a_dec`].
 pub trait AnamorphicPKE<P: PKE> {
     /// Double key
     type DK;
