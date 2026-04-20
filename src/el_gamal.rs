@@ -322,6 +322,25 @@ mod tests_normal {
 
         assert_eq!(m, dec);
     }
+
+    #[test]
+    /// 2046 bits or 255 full bytes available
+    fn test_2048_msg_barely_fit() {
+        let mut mb = [0b11111111u8; 256];
+        mb[255] = 0b00111111;
+        let mi = bytes_to_bigint(&mb).unwrap();
+        let mg = Group2048::from_modq(mi).unwrap();
+
+        let mut eg = ElGamal::new();
+        let (pk, sk) = eg.r#gen();
+        let (c1, c2) = eg.enc(&mg, &pk);
+
+        let md = eg.dec(&(c1, c2), &sk);
+        let mdi = md.to_modq();
+        let mdb = bigint_to_bytes(mdi);
+
+        assert_eq!(mb, mdb.as_slice());
+    }
 }
 
 #[cfg(test)]

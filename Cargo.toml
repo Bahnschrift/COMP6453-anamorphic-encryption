@@ -2,6 +2,7 @@
 name = "anamorphic-encryption"
 version = "0.1.0"
 edition = "2024"
+autobenches = false
 
 [dependencies]
 clap = { version = "4.6.0", features = ["derive"] }
@@ -9,3 +10,14 @@ crypto-bigint = { version = "0.7.2" }
 rand = { version = "0.10.0", features = ["chacha"] }
 rayon = "1.11.0"
 sha2 = "0.11.0"
+
+[dev-dependencies]
+criterion = "0.5.1"
+
+[[bench]]
+name = "main_bench"
+harness = false
+
+[lib]
+bench = false
+
