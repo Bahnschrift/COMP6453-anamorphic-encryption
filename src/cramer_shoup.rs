@@ -1,6 +1,3 @@
-use std::hash::Hash;
-use std::hash::{DefaultHasher, Hasher};
-
 use crypto_bigint::Uint;
 use crypto_bigint::modular::ConstMontyForm;
 use rand::{RngExt, SeedableRng, rngs::ChaCha20Rng};
@@ -56,9 +53,9 @@ impl<const LIMBS: usize, G: MCG<LIMBS>> PKE for CramerShoup<LIMBS, G> {
             G::from_modp(G::g().pow(&ge2)).unwrap(),
         );
 
-        let c = G::from_modp(G::g().pow(&x1) * G::g().pow(&x2)).unwrap();
-        let d = G::from_modp(G::g().pow(&y1) * G::g().pow(&y2)).unwrap();
-        let e = G::from_modp(G::g().pow(&z)).unwrap();
+        let c = G::from_modp(g1.pow(&x1) * g2.pow(&x2)).unwrap();
+        let d = G::from_modp(g1.pow(&y1) * g2.pow(&y2)).unwrap();
+        let e = G::from_modp(g1.pow(&z)).unwrap();
 
         let pk = (g1, g2, c, d, e);
         let sk = (x1, x2, y1, y2, z);
@@ -99,8 +96,8 @@ impl<const LIMBS: usize, G: MCG<LIMBS>> PKE for CramerShoup<LIMBS, G> {
         let h = bytes_to_bigint::<4>(&hasher.finalize()).expect("hash bigger than LIMBS");
         let h = h.resize::<LIMBS>();
 
-        let check = u1.pow(&(x1.add_mod(y1, &G::q()).mul_mod(&h, &G::q())))
-            * u2.pow(&(x2.add_mod(y2, &G::q()).mul_mod(&h, &G::q())));
+        let check = u1.pow(&(x1.add_mod(&y1.mul_mod(&h, &G::q()), &G::q())))
+            * u2.pow(&(x2.add_mod(&y2.mul_mod(&h, &G::q()), &G::q())));
 
         if check == **w {
             G::from_modp(**v * u1.invert().unwrap().pow(z)).unwrap()
@@ -126,10 +123,10 @@ mod tests_normal {
         let mi = bytes_to_bigint(m.as_bytes()).unwrap();
         let mg = GroupSmall::from_modq(mi).unwrap();
 
-        let mut eg = CramerShoup::new();
-        let (pk, sk) = eg.r#gen();
-        let c = eg.enc(&mg, &pk);
-        let md = eg.dec(&c, &sk);
+        let mut cs = CramerShoup::new();
+        let (pk, sk) = cs.r#gen();
+        let c = cs.enc(&mg, &pk);
+        let md = cs.dec(&c, &sk);
         let dec = String::from_utf8(bigint_to_bytes(md.to_modq())).unwrap();
 
         assert_eq!(m, dec);
@@ -142,12 +139,12 @@ mod tests_normal {
         let mi = bytes_to_bigint(m.as_bytes()).unwrap();
         let mg = Group2048::from_modq(mi).unwrap();
 
-        let mut eg = CramerShoup::new();
-        let (pk, sk) = eg.r#gen();
+        let mut cs = CramerShoup::new();
+        let (pk, sk) = cs.r#gen();
 
-        let c = eg.enc(&mg, &pk);
+        let c = cs.enc(&mg, &pk);
 
-        let md = eg.dec(&c, &sk);
+        let md = cs.dec(&c, &sk);
         let mdi = md.to_modq();
         let mdb = bigint_to_bytes(mdi);
         let dec = String::from_utf8(mdb).unwrap();
@@ -162,12 +159,12 @@ mod tests_normal {
         let mi = bytes_to_bigint(m.as_bytes()).unwrap();
         let mg = Group4096::from_modq(mi).unwrap();
 
-        let mut eg = CramerShoup::new();
-        let (pk, sk) = eg.r#gen();
+        let mut cs = CramerShoup::new();
+        let (pk, sk) = cs.r#gen();
 
-        let c = eg.enc(&mg, &pk);
+        let c = cs.enc(&mg, &pk);
 
-        let md = eg.dec(&c, &sk);
+        let md = cs.dec(&c, &sk);
         let mdi = md.to_modq();
         let mdb = bigint_to_bytes(mdi);
         let dec = String::from_utf8(mdb).unwrap();
