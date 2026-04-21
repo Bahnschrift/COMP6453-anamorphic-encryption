@@ -20,6 +20,8 @@ Alternatively, since rustdoc transforms comments into documentation, all documen
 
 ## Running Tests
 
+Unit tests are included in test _modules_ at the bottom of each file, and may be run with `cargo test`. Note that runs tests in debug mode by default (with extra safety guarantees from the compiler, without optimisations, etc.). Some tests will take a very long time to run in debug mode, so we recommend instead running in release mode with `cargo run --release`.
+
 ## Benchmarking
 
 ## Other Notes
