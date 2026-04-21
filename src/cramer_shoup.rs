@@ -6,6 +6,8 @@ use sha2::{Digest, Sha256};
 use crate::helpers::bytes_to_bigint;
 use crate::{groups::MCG, helpers::random_mod_lb, pke::PKE};
 
+type RandomSeed = [u8; 32];
+
 /// Cramer-Shoup encryption is defined over some group G
 #[derive(Debug)]
 pub struct CramerShoup<const LIMBS: usize, G: MCG<LIMBS>> {
@@ -14,7 +16,7 @@ pub struct CramerShoup<const LIMBS: usize, G: MCG<LIMBS>> {
 }
 
 impl<const LIMBS: usize, G: MCG<LIMBS>> CramerShoup<LIMBS, G> {
-    fn gen_seed() -> u64 {
+    fn gen_seed() -> RandomSeed {
         rand::rng().random()
     }
 
@@ -22,9 +24,9 @@ impl<const LIMBS: usize, G: MCG<LIMBS>> CramerShoup<LIMBS, G> {
         Self::new_seeded(Self::gen_seed())
     }
 
-    pub fn new_seeded(seed: u64) -> Self {
+    pub fn new_seeded(seed: RandomSeed) -> Self {
         Self {
-            rng: ChaCha20Rng::seed_from_u64(seed),
+            rng: ChaCha20Rng::from_seed(seed),
             group: std::marker::PhantomData,
         }
     }
