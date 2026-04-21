@@ -1,3 +1,8 @@
+//! # ElGamal PKE
+//!
+//! This module contains implementations for ElGamal public key encryption in both
+//! normal ([`ElGamal`]) and anamorphic ([`ElGamalAnam`]) modes.
+
 use std::collections::HashMap;
 
 use crypto_bigint::Uint;
@@ -11,7 +16,25 @@ use crate::{
     pke::{AnamorphicPKE, PKE},
 };
 
-/// ElGamal encryption is defined over some group G
+/// ElGamal PKE is defined over some cyclic group `G`. In order to ensure security,
+/// `G` *must* be a prime-order subgroup. This is typically done by choosing a
+/// safe / Sophie Germain prime pair `p` / `q`, and then letting `G` be an order
+/// `q` subgroup of the cyclic group of integers modulo `p`.
+///
+/// # Example usage
+/// ```
+/// use crypto_bigint::{Uint, modular::ConstMontyForm};
+/// use anamorphic_encryption::pke::PKE;
+/// use anamorphic_encryption::el_gamal::ElGamal;
+/// use anamorphic_encryption::groups::{MCG, GroupTiny};
+///
+/// let mut eg = ElGamal::new();
+/// let (pk, sk) = eg.r#gen();
+/// let m = GroupTiny::from_modp(ConstMontyForm::new(&Uint::from_u8(18))).unwrap();
+/// let (c1, c2) = eg.enc(&m, &pk);
+/// let d = eg.dec(&(c1, c2), &sk);
+/// assert_eq!(m, d);
+/// ```
 #[derive(Debug)]
 pub struct ElGamal<const LIMBS: usize, G: MCG<LIMBS>> {
     rng: ChaCha20Rng,
