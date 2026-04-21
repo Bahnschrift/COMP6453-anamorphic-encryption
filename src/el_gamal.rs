@@ -16,6 +16,8 @@ use crate::{
     pke::{AnamorphicPKE, PKE},
 };
 
+type RandomSeed = [u8; 32];
+
 /// ElGamal PKE is defined over some cyclic group `G`. In order to ensure security,
 /// `G` *must* be a prime-order subgroup. This is typically done by choosing a
 /// safe / Sophie Germain prime pair `p` / `q`, and then letting `G` be an order
@@ -42,7 +44,7 @@ pub struct ElGamal<const LIMBS: usize, G: MCG<LIMBS>> {
 }
 
 impl<const LIMBS: usize, G: MCG<LIMBS>> ElGamal<LIMBS, G> {
-    fn gen_seed() -> u64 {
+    fn gen_seed() -> RandomSeed {
         rand::rng().random()
     }
 
@@ -50,9 +52,9 @@ impl<const LIMBS: usize, G: MCG<LIMBS>> ElGamal<LIMBS, G> {
         Self::new_seeded(Self::gen_seed())
     }
 
-    pub fn new_seeded(seed: u64) -> Self {
+    pub fn new_seeded(seed: RandomSeed) -> Self {
         Self {
-            rng: ChaCha20Rng::seed_from_u64(seed),
+            rng: ChaCha20Rng::from_seed(seed),
             group: std::marker::PhantomData,
         }
     }
@@ -118,7 +120,7 @@ impl<const LIMBS: usize, G: MCG<LIMBS>> ElGamalAnam<LIMBS, G> {
         }
     }
 
-    pub fn new_seeded(seed: u64, l: u32, s: u32, t: u32) -> Self {
+    pub fn new_seeded(seed: RandomSeed, l: u32, s: u32, t: u32) -> Self {
         Self {
             el_gamal: ElGamal::new_seeded(seed),
             l,
@@ -180,7 +182,7 @@ impl<const LIMBS: usize, G: MCG<LIMBS> + Clone + Send + Sync> ElGamalAnam<LIMBS,
         hasher.update(&x.to_le_bytes());
         hasher.update(&y.to_le_bytes());
 
-        let seed: [u8; 32] = hasher.finalize().into();
+        let seed: RandomSeed = hasher.finalize().into();
 
         let mut rng = ChaCha20Rng::from_seed(seed);
 
