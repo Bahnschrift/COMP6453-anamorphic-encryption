@@ -20,9 +20,11 @@ Alternatively, since rustdoc transforms comments into documentation, all documen
 
 ## Running Tests
 
-Unit tests are included in test _modules_ at the bottom of each file, and may be run with `cargo test`. Note that runs tests in debug mode by default (with extra safety guarantees from the compiler, without optimisations, etc.). Some tests will take a very long time to run in debug mode, so we recommend instead running in release mode with `cargo run --release`.
+Unit tests are included in test _modules_ at the bottom of each file, and may be run with `cargo test`. Note that runs tests in debug mode by default (with extra safety guarantees from the compiler, without optimisations, etc.). Some tests will take a very long time to run in debug mode, so we recommend instead running in release mode with `cargo test --release`.
 
 ## Benchmarking
+
+Benchmark is implemented with the [`criterion`](https://docs.rs/criterion/latest/criterion/) crate and can be run with `cargo bench`. Benchmark reports will be generated in `./target/criterion` after running, and can be viewed in a web browser by opening `./target/criterion/report/index.html`. Notice that it will take very long time to run all the benchmark items. 
 
 ## Other Notes
 
