@@ -37,6 +37,17 @@ impl<const LIMBS: usize, G: MCG<LIMBS>> CramerShoup<LIMBS, G> {
             group: std::marker::PhantomData,
         }
     }
+
+    fn hash(u1: &G, u2: &G, v: &G) -> Uint<LIMBS> {
+        let mut hasher = Sha256::new();
+        hasher.update(u1.as_montgomery().to_le_bytes());
+        hasher.update(u2.as_montgomery().to_le_bytes());
+        hasher.update(v.as_montgomery().to_le_bytes());
+        let h = bytes_to_bigint::<4>(&hasher.finalize()).expect("hash bigger than LIMBS");
+        let h = h.resize::<LIMBS>();
+
+        h
+    }
 }
 
 impl<const LIMBS: usize, G: MCG<LIMBS>> PKE for CramerShoup<LIMBS, G> {
@@ -81,15 +92,7 @@ impl<const LIMBS: usize, G: MCG<LIMBS>> PKE for CramerShoup<LIMBS, G> {
         let u2 = G::from_modp(g2.pow(&r)).unwrap();
 
         let v = G::from_modp(**m * e.pow(&r)).unwrap();
-
-        let mut hasher = Sha256::new();
-        hasher.update(u1.as_montgomery().to_le_bytes());
-        hasher.update(u2.as_montgomery().to_le_bytes());
-        hasher.update(v.as_montgomery().to_le_bytes());
-        let h = bytes_to_bigint::<4>(&hasher.finalize()).expect("hash bigger than LIMBS");
-        // TODO: Take the modulus of h mod q before resizing
-        let h = h.resize::<LIMBS>();
-
+        let h = Self::hash(&u1, &u2, &v);
         let w = G::from_modp(c.pow(&r) * d.pow(&(r.mul_mod(&h, &G::q())))).unwrap();
 
         let c = ((v, w), (u1, u2));
@@ -101,13 +104,7 @@ impl<const LIMBS: usize, G: MCG<LIMBS>> PKE for CramerShoup<LIMBS, G> {
         let ((v, w), (u1, u2)) = c;
         let (x1, x2, y1, y2, z) = sk;
 
-        let mut hasher = Sha256::new();
-        hasher.update(u1.as_montgomery().to_le_bytes());
-        hasher.update(u2.as_montgomery().to_le_bytes());
-        hasher.update(v.as_montgomery().to_le_bytes());
-        let h = bytes_to_bigint::<4>(&hasher.finalize()).expect("hash bigger than LIMBS");
-        // TODO: Take the modulus of h mod q before resizing
-        let h = h.resize::<LIMBS>();
+        let h = Self::hash(&u1, &u2, &v);
 
         let check = u1.pow(&(x1.add_mod(&y1.mul_mod(&h, &G::q()), &G::q())))
             * u2.pow(&(x2.add_mod(&y2.mul_mod(&h, &G::q()), &G::q())));
@@ -291,15 +288,7 @@ impl<const LIMBS: usize, G: MCG<LIMBS> + Clone + Send + Sync> AnamorphicPKE<Cram
                 let u2 = G::from_modp(g2.pow(&r)).unwrap();
 
                 let v = G::from_modp(**m * e.pow(&r)).unwrap();
-
-                let mut hasher = Sha256::new();
-                hasher.update(u1.as_montgomery().to_le_bytes());
-                hasher.update(u2.as_montgomery().to_le_bytes());
-                hasher.update(v.as_montgomery().to_le_bytes());
-                let h = bytes_to_bigint::<4>(&hasher.finalize()).expect("hash bigger than LIMBS");
-                // TODO: Take the modulus of h mod q before resizing
-                let h = h.resize::<LIMBS>();
-
+                let h = CramerShoup::hash(&u1, &u2, &v);
                 let w = G::from_modp(c.pow(&r) * d.pow(&(r.mul_mod(&h, &G::q())))).unwrap();
 
                 let c = ((v, w), (u1, u2));
