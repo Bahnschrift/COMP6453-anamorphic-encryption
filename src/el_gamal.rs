@@ -239,7 +239,12 @@ impl<const LIMBS: usize, G: MCG<LIMBS> + Clone + Send + Sync> AnamorphicPKE<ElGa
     }
 
     /// Decrypt a ciphertext with the double key, return the covert message.
-    fn a_dec(&mut self, dk: &Self::DK, c: &<ElGamal<LIMBS, G> as PKE>::C) -> Option<Self::CM> {
+    fn a_dec(
+        &mut self,
+        _: &<ElGamal<LIMBS, G> as PKE>::PK,
+        dk: &Self::DK,
+        c: &<ElGamal<LIMBS, G> as PKE>::C,
+    ) -> Option<Self::CM> {
         // Recover y from the ciphertext
         let y = self.extract_feature(&c.1);
 
@@ -370,7 +375,7 @@ mod tests_anamorphic {
             .expect("Failed to encrypt with covert message");
 
         let cm_dec = eg_anam
-            .a_dec(&dk, &c)
+            .a_dec(&pk, &dk, &c)
             .expect("Failed to decrypt covert message");
 
         assert_eq!(cm, cm_dec);
@@ -413,7 +418,7 @@ mod tests_anamorphic {
         let mg = Group2048::from_modq(mi).unwrap();
 
         let c = eg_anam.el_gamal.enc(&mg, &pk);
-        let cm_dec = eg_anam.a_dec(&dk, &c);
+        let cm_dec = eg_anam.a_dec(&pk, &dk, &c);
         assert!(cm_dec.is_none());
     }
 }

@@ -300,7 +300,13 @@ impl<const LIMBS: usize, G: MCG<LIMBS> + Clone + Send + Sync> AnamorphicPKE<Cram
     }
 
     /// Decrypt a ciphertext with the double key, return the covert message.
-    fn a_dec(&mut self, dk: &Self::DK, c: &<CramerShoup<LIMBS, G> as PKE>::C) -> Option<Self::CM> {
+    fn a_dec(
+        &mut self,
+        pk: &<CramerShoup<LIMBS, G> as PKE>::PK,
+        dk: &Self::DK,
+        c: &<CramerShoup<LIMBS, G> as PKE>::C,
+    ) -> Option<Self::CM> {
+        let (g1, _, _, _, _) = pk;
         let (_, (u1, _)) = c;
 
         // Recover y from the ciphertext
@@ -310,7 +316,7 @@ impl<const LIMBS: usize, G: MCG<LIMBS> + Clone + Send + Sync> AnamorphicPKE<Cram
         let result = (0..self.s).into_par_iter().find_map_any(|x| {
             let t = self.a_rng(dk, x, y);
             let t_neg = G::q().wrapping_sub(&t);
-            let s_val = u1.mul(&G::g().pow(&t_neg)).retrieve();
+            let s_val = u1.mul(&g1.pow(&t_neg)).retrieve();
 
             if dk.t.contains_key(&s_val) {
                 Some(dk.t[&s_val])
@@ -414,7 +420,7 @@ mod tests_anamorphic {
             .expect("Failed to encrypt with covert message");
 
         let cm_dec = cs_anam
-            .a_dec(&dk, &c)
+            .a_dec(&pk, &dk, &c)
             .expect("Failed to decrypt covert message");
 
         assert_eq!(cm, cm_dec);
@@ -457,7 +463,7 @@ mod tests_anamorphic {
         let mg = Group2048::from_modq(mi).unwrap();
 
         let c = cs_anam.cramer_shoup.enc(&mg, &pk);
-        let cm_dec = cs_anam.a_dec(&dk, &c);
+        let cm_dec = cs_anam.a_dec(&pk, &dk, &c);
         assert!(cm_dec.is_none());
     }
 }

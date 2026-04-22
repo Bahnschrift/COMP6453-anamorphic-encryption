@@ -61,5 +61,5 @@ pub trait AnamorphicPKE<P: PKE> {
     /// Anamorphic decryption.
     ///
     /// Returns `None` if `c` does not contain a covert message under `dk`.
-    fn a_dec(&mut self, dk: &Self::DK, c: &P::C) -> Option<Self::CM>;
+    fn a_dec(&mut self, pk: &P::PK, dk: &Self::DK, c: &P::C) -> Option<Self::CM>;
 }
