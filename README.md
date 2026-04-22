@@ -10,6 +10,8 @@ All functionality has been implemented purely as a rust crate (library). We do n
 
 The library may be built to machine-dependent object files with `cargo build --release`, though the recommended way to use it is simply by importing it into another cargo project with `cargo add --git https://github.com/Bahnschrift/COMP6453-anamorphic-encryption.git`.
 
+If you do not have rust installed, the recommended way to get started is using [rustup](https://rustup.rs/).
+
 ## Documentation
 
 We've included extensive documentation as [rustdoc](https://doc.rust-lang.org/rustdoc/index.html) within our code.
