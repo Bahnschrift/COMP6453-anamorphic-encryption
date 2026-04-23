@@ -28,7 +28,7 @@ impl PkeBenchProvider for BenchElGamal2048 {
         vec![64, 128, 256, 512]
     }
 
-    fn sample_msg(pke: &mut Self::Base) -> <Self::Base as PKE>::M {
+    fn sample_msg(_pke: &mut Self::Base) -> <Self::Base as PKE>::M {
         // A simple constant message encoded into the group
         let num = Uint::<32>::from_u32(42);
         Group2048::from_modq(num).unwrap()
@@ -39,7 +39,7 @@ impl PkeBenchProvider for BenchElGamal2048 {
         42
     }
 
-    /// Benchmark Anamorphic ElGamal with different s and t params, l fiexed at 256.
+    /// Benchmark Anamorphic ElGamal with different s and t params, l fixed at 256.
     fn extra_benches(c: &mut criterion::Criterion) {
         use criterion::{BenchmarkId, black_box};
 
@@ -66,7 +66,6 @@ impl PkeBenchProvider for BenchElGamal2048 {
 
                     b.iter(|| {
                         anam_pke.a_enc(
-                            black_box(&pk),
                             black_box(&dk),
                             black_box(&msg),
                             black_box(&covert_msg),
@@ -88,7 +87,7 @@ impl PkeBenchProvider for BenchElGamal2048 {
                     let msg = Group2048::from_modq(num).unwrap();
                     let covert_msg = 42;
                     let cipher = anam_pke
-                        .a_enc(&pk, &dk, &msg, &covert_msg)
+                        .a_enc(&dk, &msg, &covert_msg)
                         .expect("a_enc failed");
 
                     b.iter(|| anam_pke.a_dec(black_box(&dk), black_box(&cipher)));
@@ -115,7 +114,6 @@ impl PkeBenchProvider for BenchElGamal2048 {
 
                     b.iter(|| {
                         anam_pke.a_enc(
-                            black_box(&pk),
                             black_box(&dk),
                             black_box(&msg),
                             black_box(&covert_msg),
@@ -137,7 +135,7 @@ impl PkeBenchProvider for BenchElGamal2048 {
                     let msg = Group2048::from_modq(num).unwrap();
                     let covert_msg = 42;
                     let cipher = anam_pke
-                        .a_enc(&pk, &dk, &msg, &covert_msg)
+                        .a_enc(&dk, &msg, &covert_msg)
                         .expect("a_enc failed");
 
                     b.iter(|| anam_pke.a_dec(black_box(&dk), black_box(&cipher)));

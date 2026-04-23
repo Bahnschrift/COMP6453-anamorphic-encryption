@@ -29,7 +29,7 @@ pub trait PkeBenchProvider {
     const MAX_MSG_BYTES: usize;
 
     /// Optional scheme-specific benchmarks
-    fn extra_benches(c: &mut Criterion) {}
+    fn extra_benches(c: &mut Criterion) -> ();
 }
 
 // Benchmark Runners
@@ -84,7 +84,6 @@ pub fn bench_anamorphic_pke<Bench: PkeBenchProvider>(c: &mut Criterion) {
         group2.bench_with_input(BenchmarkId::new("a_enc", l), &l, |b, &_| {
             b.iter(|| {
                 anam_pke.a_enc(
-                    black_box(&pk),
                     black_box(&dk),
                     black_box(&msg),
                     black_box(&covert_msg),
@@ -93,7 +92,7 @@ pub fn bench_anamorphic_pke<Bench: PkeBenchProvider>(c: &mut Criterion) {
         });
 
         let anam_cipher = anam_pke
-            .a_enc(&pk, &dk, &msg, &covert_msg)
+            .a_enc(&dk, &msg, &covert_msg)
             .expect("a_enc failed");
 
         group2.bench_with_input(BenchmarkId::new("a_dec", l), &l, |b, &_| {
@@ -132,7 +131,6 @@ pub fn bench_throughput<Bench: PkeBenchProvider>(c: &mut Criterion) {
     group.bench_function("Anamorphic Enc Throughput (Covert Bits/s)", |b| {
         b.iter(|| {
             anam_pke.a_enc(
-                black_box(&pk),
                 black_box(&dk),
                 black_box(&msg),
                 black_box(&covert_msg),
