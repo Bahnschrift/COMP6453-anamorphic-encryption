@@ -131,10 +131,12 @@ impl<const LIMBS: usize, G: MCG<LIMBS>> ElGamalAnam<LIMBS, G> {
 }
 
 #[derive(Debug, Clone)]
-pub struct ElGamalDK<const LIMBS: usize, CM>
+pub struct ElGamalDK<const LIMBS: usize, G: MCG<LIMBS>, CM>
 where
     CM: Clone,
 {
+    pk: <ElGamal<LIMBS, G> as PKE>::PK,
+
     /// The symmetric key used to encrypt and decrypt covert messages
     ///
     /// It act as a random noise in the generation of the offset.
@@ -190,10 +192,11 @@ impl<const LIMBS: usize, G: MCG<LIMBS> + Clone + Send + Sync> ElGamalAnam<LIMBS,
     }
 }
 
-impl<const LIMBS: usize, G: MCG<LIMBS> + Clone + Send + Sync> AnamorphicPKE<ElGamal<LIMBS, G>>
-    for ElGamalAnam<LIMBS, G>
+impl<'a, const LIMBS: usize, G> AnamorphicPKE<ElGamal<LIMBS, G>> for ElGamalAnam<LIMBS, G>
+where
+    G: MCG<LIMBS> + Clone + Send + Sync,
 {
-    type DK = ElGamalDK<LIMBS, Self::CM>;
+    type DK = ElGamalDK<LIMBS, G, Self::CM>;
     type CM = u32;
 
     /// Generate a double key to be used in anamorphic encryption and decryption.
@@ -202,7 +205,7 @@ impl<const LIMBS: usize, G: MCG<LIMBS> + Clone + Send + Sync> AnamorphicPKE<ElGa
     fn a_gen(
         &mut self,
         _: &<ElGamal<LIMBS, G> as PKE>::SK,
-        _: &<ElGamal<LIMBS, G> as PKE>::PK,
+        pk: &<ElGamal<LIMBS, G> as PKE>::PK,
     ) -> Self::DK {
         // The symmetric key for anamorphic encryption
         let mut k = [0u8; 32];
@@ -220,13 +223,14 @@ impl<const LIMBS: usize, G: MCG<LIMBS> + Clone + Send + Sync> AnamorphicPKE<ElGa
             current_g = G::from_modp(next_val).unwrap();
         }
 
-        ElGamalDK { k, t }
+        let pk = pk.clone();
+
+        ElGamalDK { pk, k, t }
     }
 
     // Encrypt a message along with a covert message cm.
     fn a_enc(
         &mut self,
-        pk: &<ElGamal<LIMBS, G> as PKE>::PK,
         dk: &Self::DK,
         m: &<ElGamal<LIMBS, G> as PKE>::M,
         cm: &Self::CM,
@@ -251,7 +255,7 @@ impl<const LIMBS: usize, G: MCG<LIMBS> + Clone + Send + Sync> AnamorphicPKE<ElGa
                 let feature = self.extract_feature(&c2);
 
                 if feature == y {
-                    let c1 = G::from_modp(**m * pk.pow(&r)).unwrap();
+                    let c1 = G::from_modp(**m * dk.pk.pow(&r)).unwrap();
                     Some((c1, c2))
                 } else {
                     None
@@ -389,7 +393,7 @@ mod tests_anamorphic {
         let cm: u32 = 114;
 
         let c = eg_anam
-            .a_enc(&pk, &dk, &mg, &cm)
+            .a_enc(&dk, &mg, &cm)
             .expect("Failed to encrypt with covert message");
 
         let cm_dec = eg_anam
@@ -419,7 +423,7 @@ mod tests_anamorphic {
 
         let cm: u32 = 300;
 
-        let c = eg_anam.a_enc(&pk, &dk, &mg, &cm);
+        let c = eg_anam.a_enc(&dk, &mg, &cm);
 
         assert!(c.is_none());
     }
