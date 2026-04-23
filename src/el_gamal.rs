@@ -118,6 +118,8 @@ impl<const LIMBS: usize, G: MCG<LIMBS>> PKE for ElGamal<LIMBS, G> {
 /// Time complexity grows with `O(l⋅s⋅t)`. Anamorphic encryption is too slow to be practical above
 /// sufficiently large paramters, so they are bounded to u32.
 ///
+/// `ElGamalAnam` dereferences to the underlying `ElGamal` instance for normal decoding.
+///
 /// # Example usage
 /// ```
 /// use crypto_bigint::{Uint, modular::ConstMontyForm};
@@ -149,18 +151,18 @@ impl<const LIMBS: usize, G: MCG<LIMBS>> PKE for ElGamal<LIMBS, G> {
 pub struct ElGamalAnam<const LIMBS: usize, G: MCG<LIMBS>> {
     el_gamal: ElGamal<LIMBS, G>,
 
-    /// Covert message space size
+    // Covert message space size
     l: u32,
 
-    /// Upper bound of randomly generated x, 0 < x < s.
-    ///
-    /// x adds randomness to the random offset(F(k, x, y)), there will be a possibility of 1/e we
-    /// never get a matching feature without it.
+    // Upper bound of randomly generated x, 0 < x < s.
+    //
+    // x adds randomness to the random offset(F(k, x, y)), there will be a possibility of 1/e we
+    // never get a matching feature without it.
     s: u32,
 
-    /// Upper bound of randomly generated y, 0 < y < t.
-    ///
-    /// We will require d(2nd part of ciphertext) = d(g^(cm + F(k, x, y))) == y
+    // Upper bound of randomly generated y, 0 < y < t.
+    //
+    // We will require d(2nd part of ciphertext) = d(g^(cm + F(k, x, y))) == y
     t: u32,
 }
 
@@ -179,6 +181,8 @@ impl<const LIMBS: usize, G: MCG<LIMBS>> Deref for ElGamalAnam<LIMBS, G> {
 }
 
 impl<const LIMBS: usize, G: MCG<LIMBS>> ElGamalAnam<LIMBS, G> {
+    /// Creates a new `ElGamalAnam` with parameters `l`, `s` and `t` (underlying `ElGamal` instance
+    /// is randomly seeded)
     pub fn new(l: u32, s: u32, t: u32) -> Self {
         Self {
             el_gamal: ElGamal::new(),
@@ -188,6 +192,7 @@ impl<const LIMBS: usize, G: MCG<LIMBS>> ElGamalAnam<LIMBS, G> {
         }
     }
 
+    /// Creates a new `ElGamalAnam` with parameters `l`, `s` and `t` and seeded `ElGamal` instance
     pub fn new_seeded(seed: RandomSeed, l: u32, s: u32, t: u32) -> Self {
         Self {
             el_gamal: ElGamal::new_seeded(seed),
@@ -198,6 +203,8 @@ impl<const LIMBS: usize, G: MCG<LIMBS>> ElGamalAnam<LIMBS, G> {
     }
 }
 
+/// Anamorphic Double Key. Result of `a_gen`, contains extra paramaters for anamorphic
+/// encryption/decryption.
 #[derive(Debug, Clone)]
 pub struct ElGamalDK<const LIMBS: usize, G: MCG<LIMBS>, CM>
 where
@@ -205,27 +212,30 @@ where
 {
     pk: <ElGamal<LIMBS, G> as PKE>::PK,
 
-    /// The symmetric key used to encrypt and decrypt covert messages
-    ///
-    /// It act as a random noise in the generation of the offset.
-    /// Without it, an adversary can easily recover the covert message by trying all possible x in [0, s).
-    /// Also, it should not be too short to prevent brute-force.
+    // The symmetric key used to encrypt and decrypt covert messages
+    //
+    // It act as a random noise in the generation of the offset.
+    // Without it, an adversary can easily recover the covert message by trying all possible x in
+    // [0, s). Also, it should not be too short to prevent brute-force.
     k: [u8; 32],
 
-    /// A hashmap stores g^cm as key and cm as value
-    ///
-    /// Upon decryption, we recover y with d(c2), then we search the space of [0, s) to try each possible x.
-    /// We can then compute offset = F(k, x, y), and check if c2 / g^offset = g^cm is in this table.
-    /// If it is, then the x is correct, and we have found the covert message.
-    ///
-    /// It is not necessarily a secret, but a receiver will need to generate it again from the parameters if it is not delivered with the key
+    // A hashmap stores g^cm as key and cm as value
+    //
+    // Upon decryption, we recover y with d(c2), then we search the space of [0, s) to try each
+    // possible x. We can then compute offset = F(k, x, y), and check if c2 / g^offset = g^cm is
+    // in this table. If it is, then the x is correct, and we have found the covert message.
+    //
+    // It is not necessarily a secret, but a receiver will need to generate it again from the
+    // parameters if it is not delivered with the key
     t: HashMap<Uint<LIMBS>, CM>,
 }
 
 impl<const LIMBS: usize, G: MCG<LIMBS> + Clone + Send + Sync> ElGamalAnam<LIMBS, G> {
-    /// Implementation of function d in the python version, extracts a feature from the 2nd part of the ciphertext.
-    ///
-    /// We simplified the approach by taking the lowest 32 bits from ciphertext and mod it by t, avoiding big int operations
+    // Implementation of function d in the python version, extracts a feature from the 2nd part of
+    // the ciphertext.
+    //
+    // We simplified the approach by taking the lowest 32 bits from ciphertext and mod it by t,
+    // avoiding big int operations
     fn extract_feature(&self, c_2nd: &G) -> u32 {
         let val = c_2nd.retrieve();
 
@@ -238,9 +248,10 @@ impl<const LIMBS: usize, G: MCG<LIMBS> + Clone + Send + Sync> ElGamalAnam<LIMBS,
         low_u32 % self.t
     }
 
-    /// Implementation of function F in the python version, a hash function that takes in dk, x, y and outputs a random number in [0, q)
-    ///
-    /// We use it to generate a random offset, which is added to the covert message
+    // Implementation of function F in the python version, a hash function that takes in dk, x, y
+    // and outputs a random number in [0, q)
+    //
+    // We use it to generate a random offset, which is added to the covert message
     fn a_rng(
         &self,
         dk: &<Self as AnamorphicPKE<ElGamal<LIMBS, G>>>::DK,
@@ -267,9 +278,8 @@ where
     type DK = ElGamalDK<LIMBS, G, Self::CM>;
     type CM = u32;
 
-    /// Generate a double key to be used in anamorphic encryption and decryption.
-    ///
-    /// I did some benchmarking and this is actually the most time consuming part, taking 20x longer than encryption in debug mode
+    /// Generate a double key to be used in anamorphic encryption and decryption. Takes much longer
+    /// than any other function in normal mode.
     fn a_gen(
         &mut self,
         _: &<ElGamal<LIMBS, G> as PKE>::SK,
@@ -296,7 +306,7 @@ where
         ElGamalDK { pk, k, t }
     }
 
-    // Encrypt a message along with a covert message cm.
+    /// Encrypt a message along with a covert message cm.
     fn a_enc(
         &mut self,
         dk: &Self::DK,
