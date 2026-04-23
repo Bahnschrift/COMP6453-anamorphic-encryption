@@ -1,3 +1,8 @@
+//! # PKE Helpers
+//!
+//! This module provides helper functions for public key encryption, such as converting between
+//! strings/bytes and `crypto_bigint` types.
+
 use crypto_bigint::{BitOps, NonZero, RandomMod, Uint};
 use rand::Rng;
 
