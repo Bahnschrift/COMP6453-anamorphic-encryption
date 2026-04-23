@@ -71,7 +71,7 @@ pub struct RsaSK<const MOD_LIMBS: usize, const PRIME_LIMBS: usize> {
 /// - Panics at compile time if the modulus size (`MOD_LIMBS`) is not at least twice
 ///   the size of the prime factors (`PRIME_LIMBS`).
 #[derive(Debug)]
-pub struct RSA<const MOD_LIMBS: usize, const PRIME_LIMBS: usize> {
+pub(crate) struct RSA<const MOD_LIMBS: usize, const PRIME_LIMBS: usize> {
     rng: ChaCha20Rng,
 }
 
@@ -251,7 +251,7 @@ impl<const MOD_LIMBS: usize, const PRIME_LIMBS: usize> PKE for RSA<MOD_LIMBS, PR
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::pke::PKE;
+    use crate::{helpers::bytes_to_bigint, pke::PKE};
 
     #[test]
     fn test_rsa_1024() {
@@ -291,13 +291,15 @@ mod tests {
 
     #[test]
     fn test_rsa_4096() {
-        let mut rsa = RSA::<64, 32>::new();
+        let mut rsa = RSA::<32, 16>::new();
+
         let (pk, sk) = rsa.r#gen();
-        let mut bytes = [255u8; 512];
-        bytes[0] = 0; // Ensure m < n
-        let m = Uint::<64>::from_be_slice(&bytes);
+
+        let m = "According to all known laws of aviation, there is no way that a bee should be able to fly. Its wings are too small to get its fat little body off the ground. The bee, of course, flies anyway because bees don't care what humans think is impossible.";
+        let m = bytes_to_bigint(m.as_bytes()).unwrap();
         let c = rsa.enc(&m, &pk);
         let d = rsa.dec(&c, &sk);
+
         assert_eq!(m, d);
     }
 }
