@@ -158,10 +158,12 @@ impl<const LIMBS: usize, G: MCG<LIMBS>> CramerShoupAnam<LIMBS, G> {
 }
 
 #[derive(Debug, Clone)]
-pub struct CramerShoupDK<const LIMBS: usize, CM>
+pub struct CramerShoupDK<const LIMBS: usize, G: MCG<LIMBS>, CM>
 where
     CM: Clone,
 {
+    pk: <CramerShoup<LIMBS, G> as PKE>::PK,
+
     /// The symmetric key used to encrypt and decrypt covert messages
     ///
     /// It act as a random noise in the generation of the offset.
@@ -220,7 +222,7 @@ impl<const LIMBS: usize, G: MCG<LIMBS> + Clone + Send + Sync> CramerShoupAnam<LI
 impl<const LIMBS: usize, G: MCG<LIMBS> + Clone + Send + Sync> AnamorphicPKE<CramerShoup<LIMBS, G>>
     for CramerShoupAnam<LIMBS, G>
 {
-    type DK = CramerShoupDK<LIMBS, Self::CM>;
+    type DK = CramerShoupDK<LIMBS, G, Self::CM>;
     type CM = u32;
 
     /// Generate a double key to be used in anamorphic encryption and decryption.
@@ -248,18 +250,19 @@ impl<const LIMBS: usize, G: MCG<LIMBS> + Clone + Send + Sync> AnamorphicPKE<Cram
             current_g = G::from_modp(next_val).unwrap();
         }
 
-        CramerShoupDK { k, t }
+        let pk = pk.clone();
+
+        CramerShoupDK { pk, k, t }
     }
 
     // Encrypt a message along with a covert message cm.
     fn a_enc(
         &mut self,
-        pk: &<CramerShoup<LIMBS, G> as PKE>::PK,
         dk: &Self::DK,
         m: &<CramerShoup<LIMBS, G> as PKE>::M,
         cm: &Self::CM,
     ) -> Option<<CramerShoup<LIMBS, G> as PKE>::C> {
-        let (g1, g2, c, d, e) = pk;
+        let (g1, g2, c, d, e) = dk.pk.clone();
 
         if cm >= &self.l {
             return None;
@@ -300,13 +303,8 @@ impl<const LIMBS: usize, G: MCG<LIMBS> + Clone + Send + Sync> AnamorphicPKE<Cram
     }
 
     /// Decrypt a ciphertext with the double key, return the covert message.
-    fn a_dec(
-        &mut self,
-        pk: &<CramerShoup<LIMBS, G> as PKE>::PK,
-        dk: &Self::DK,
-        c: &<CramerShoup<LIMBS, G> as PKE>::C,
-    ) -> Option<Self::CM> {
-        let (g1, _, _, _, _) = pk;
+    fn a_dec(&mut self, dk: &Self::DK, c: &<CramerShoup<LIMBS, G> as PKE>::C) -> Option<Self::CM> {
+        let (g1, _, _, _, _) = dk.pk.clone();
         let (_, (u1, _)) = c;
 
         // Recover y from the ciphertext
@@ -416,11 +414,11 @@ mod tests_anamorphic {
         let cm: u32 = 114;
 
         let c = cs_anam
-            .a_enc(&pk, &dk, &mg, &cm)
+            .a_enc(&dk, &mg, &cm)
             .expect("Failed to encrypt with covert message");
 
         let cm_dec = cs_anam
-            .a_dec(&pk, &dk, &c)
+            .a_dec(&dk, &c)
             .expect("Failed to decrypt covert message");
 
         assert_eq!(cm, cm_dec);
@@ -446,7 +444,7 @@ mod tests_anamorphic {
 
         let cm: u32 = 300;
 
-        let c = cs_anam.a_enc(&pk, &dk, &mg, &cm);
+        let c = cs_anam.a_enc(&dk, &mg, &cm);
 
         assert!(c.is_none());
     }
@@ -463,7 +461,7 @@ mod tests_anamorphic {
         let mg = Group2048::from_modq(mi).unwrap();
 
         let c = cs_anam.cramer_shoup.enc(&mg, &pk);
-        let cm_dec = cs_anam.a_dec(&pk, &dk, &c);
+        let cm_dec = cs_anam.a_dec(&dk, &c);
         assert!(cm_dec.is_none());
     }
 }
