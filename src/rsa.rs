@@ -1,3 +1,9 @@
+//! # RSA PKE
+//!
+//! This module contains an implementation of the RSA public key encryption scheme.
+//! It supports standard key generation, encryption, and decryption, with
+//! optimizations like the Chinese Remainder Theorem (CRT) for decryption.
+
 use std::ops::Mul;
 use std::ops::Sub;
 
@@ -11,36 +17,60 @@ use crate::pke::PKE;
 
 type RandomSeed = [u8; 32];
 
-/// RSA public key
+/// RSA public key.
+///
+/// Consists of the modulus `n` and the public exponent `e`.
 #[derive(Clone, Debug)]
 pub struct RsaPK<const MOD_LIMBS: usize> {
-    /// Modulus
-    n: Uint<MOD_LIMBS>,
-    /// Public exponent, we will use 65537 for this
-    e: Uint<1>,
+    /// Modulus `n = p * q`
+    pub n: Uint<MOD_LIMBS>,
+    /// Public exponent, typically 65537
+    pub e: Uint<1>,
 }
 
-/// RSA private key, fields are from the second private key representation given by RFC8017, section 3.2
-/// We use snake case for some fields since this is in Rust
+/// RSA private key using the CRT representation.
+///
+/// Fields are based on the second private key representation given by RFC 8017, Section 3.2.
+/// This representation enables significantly faster decryption using the Chinese Remainder Theorem.
 #[derive(Clone, Debug)]
 pub struct RsaSK<const MOD_LIMBS: usize, const PRIME_LIMBS: usize> {
-    /// The first factor
-    p: Uint<PRIME_LIMBS>,
-    /// The second factor
-    q: Uint<PRIME_LIMBS>,
-    /// CRT exponent of p, d mod (p - 1)
-    d_p: Uint<PRIME_LIMBS>,
-    /// CRT exponent of q, d mod (q - 1)
-    d_q: Uint<PRIME_LIMBS>,
-    /// CRT coefficient, q^-1 mod p
-    q_inv: Uint<PRIME_LIMBS>,
-    // We don't intend to implement multi-prime RSA, so the triplets are not included
+    /// The first prime factor `p`
+    pub p: Uint<PRIME_LIMBS>,
+    /// The second prime factor `q`
+    pub q: Uint<PRIME_LIMBS>,
+    /// CRT exponent of `p`: `dP = d mod (p - 1)`
+    pub d_p: Uint<PRIME_LIMBS>,
+    /// CRT exponent of `q`: `dQ = d mod (q - 1)`
+    pub d_q: Uint<PRIME_LIMBS>,
+    /// CRT coefficient: `qInv = q^-1 mod p`
+    pub q_inv: Uint<PRIME_LIMBS>,
 }
 
-/// Standard RSA implementation
+/// Standard RSA implementation.
+///
+/// RSA is an asymmetric cryptographic algorithm that relies on the difficulty of
+/// factoring the product of two large prime numbers.
+///
+/// # Example usage
+/// ```
+/// use crypto_bigint::Uint;
+/// use anamorphic_encryption::pke::PKE;
+/// use anamorphic_encryption::rsa::RSA;
+///
+/// // Create RSA-2048 (32 limbs of 64 bits each for the 2048-bit modulus)
+/// let mut rsa = RSA::<32, 16>::new();
+/// let (pk, sk) = rsa.r#gen();
+///
+/// let m = Uint::<32>::from(12345u32);
+/// let c = rsa.enc(&m, &pk);
+/// let d = rsa.dec(&c, &sk);
+/// assert_eq!(m, d);
+/// ```
 ///
 /// # Panics:
-/// - Panics at compile time if the modulus size is not at least twice the prime size.
+/// - Panics at compile time if the modulus size (`MOD_LIMBS`) is not at least twice
+///   the size of the prime factors (`PRIME_LIMBS`).
+#[derive(Debug)]
 pub struct RSA<const MOD_LIMBS: usize, const PRIME_LIMBS: usize> {
     rng: ChaCha20Rng,
 }
@@ -51,6 +81,7 @@ impl<const MOD_LIMBS: usize, const PRIME_LIMBS: usize> RSA<MOD_LIMBS, PRIME_LIMB
         "Modulus must be at least twice the size of the prime factors"
     );
 
+    /// Creates a new randomly seeded `RSA<MOD_LIMBS, PRIME_LIMBS>`.
     pub fn new() -> Self {
         // Trigger the compile-time assertion
         let _ = Self::ASSERT_LIMBS_RATIO;
@@ -59,6 +90,23 @@ impl<const MOD_LIMBS: usize, const PRIME_LIMBS: usize> RSA<MOD_LIMBS, PRIME_LIMB
         }
     }
 
+    /// Creates a new seeded `RSA<MOD_LIMBS, PRIME_LIMBS>`
+    ///
+    /// # Example usage
+    /// ```
+    /// use anamorphic_encryption::pke::PKE;
+    /// use anamorphic_encryption::rsa::RSA;
+    ///
+    /// let seed = [42u8; 32];
+    /// let mut rsa1 = RSA::<32, 16>::new_seeded(seed);
+    /// let (pk1, sk1) = rsa1.r#gen();
+    ///
+    /// let mut rsa2 = RSA::<32, 16>::new_seeded(seed);
+    /// let (pk2, sk2) = rsa2.r#gen();
+    ///
+    /// // Same seed produces the same key pair
+    /// assert_eq!(pk1.n, pk2.n);
+    /// ```
     pub fn new_seeded(seed: RandomSeed) -> Self {
         let _ = Self::ASSERT_LIMBS_RATIO;
         Self {
@@ -68,14 +116,12 @@ impl<const MOD_LIMBS: usize, const PRIME_LIMBS: usize> RSA<MOD_LIMBS, PRIME_LIMB
 }
 
 impl<const MOD_LIMBS: usize, const PRIME_LIMBS: usize> PKE for RSA<MOD_LIMBS, PRIME_LIMBS> {
-    // RSA is not based on a cyclic group so G won't come in handy here...
     type PK = RsaPK<MOD_LIMBS>;
     type SK = RsaSK<MOD_LIMBS, PRIME_LIMBS>;
     type M = Uint<MOD_LIMBS>;
     type C = Uint<MOD_LIMBS>;
 
     fn r#gen(&mut self) -> (Self::PK, Self::SK) {
-        // Hardcode e like everyone else does
         let e: Uint<1> = Uint::from_u64(65537);
 
         loop {
@@ -119,9 +165,9 @@ impl<const MOD_LIMBS: usize, const PRIME_LIMBS: usize> PKE for RSA<MOD_LIMBS, PR
             let d_q = d.rem(&q_minus_1);
 
             // qInv = q^-1 mod p
-            // p > q, should be safe
+            // This won't panic since p > 0
             let p_nz = NonZero::new(p).unwrap();
-            // q and p should be coprime so this should also be safe
+            // This won't panic since p and q are coprime
             let q_inv = q.invert_mod(&p_nz).unwrap();
 
             let pk = RsaPK { n, e };
@@ -193,15 +239,50 @@ mod tests {
     use crate::pke::PKE;
 
     #[test]
-    fn test_rsa_2048() {
-        let mut rsa = RSA::<32, 16>::new();
-
+    fn test_rsa_1024() {
+        let mut rsa = RSA::<16, 8>::new();
         let (pk, sk) = rsa.r#gen();
-
-        let m = Uint::<32>::from(12345u32);
+        let mut bytes = [255u8; 128];
+        bytes[0] = 0; // Ensure m < n
+        let m = Uint::<16>::from_be_slice(&bytes);
         let c = rsa.enc(&m, &pk);
         let d = rsa.dec(&c, &sk);
+        assert_eq!(m, d);
+    }
 
+    #[test]
+    fn test_rsa_2048() {
+        let mut rsa = RSA::<32, 16>::new();
+        let (pk, sk) = rsa.r#gen();
+        let mut bytes = [255u8; 256];
+        bytes[0] = 0; // Ensure m < n
+        let m = Uint::<32>::from_be_slice(&bytes);
+        let c = rsa.enc(&m, &pk);
+        let d = rsa.dec(&c, &sk);
+        assert_eq!(m, d);
+    }
+
+    #[test]
+    fn test_rsa_3072() {
+        let mut rsa = RSA::<48, 24>::new();
+        let (pk, sk) = rsa.r#gen();
+        let mut bytes = [255u8; 384];
+        bytes[0] = 0; // Ensure m < n
+        let m = Uint::<48>::from_be_slice(&bytes);
+        let c = rsa.enc(&m, &pk);
+        let d = rsa.dec(&c, &sk);
+        assert_eq!(m, d);
+    }
+
+    #[test]
+    fn test_rsa_4096() {
+        let mut rsa = RSA::<64, 32>::new();
+        let (pk, sk) = rsa.r#gen();
+        let mut bytes = [255u8; 512];
+        bytes[0] = 0; // Ensure m < n
+        let m = Uint::<64>::from_be_slice(&bytes);
+        let c = rsa.enc(&m, &pk);
+        let d = rsa.dec(&c, &sk);
         assert_eq!(m, d);
     }
 }
