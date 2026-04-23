@@ -5,6 +5,7 @@ use rayon::prelude::*;
 use sha2::{Digest, Sha256};
 
 use std::collections::HashMap;
+use std::ops::{Deref, DerefMut};
 
 use crate::helpers::bytes_to_bigint;
 use crate::{
@@ -135,6 +136,20 @@ pub struct CramerShoupAnam<const LIMBS: usize, G: MCG<LIMBS>> {
     ///
     /// We will require d(2nd part of ciphertext) = d(g^(cm + F(k, x, y))) == y
     t: u32,
+}
+
+impl<const LIMBS: usize, G: MCG<LIMBS>> DerefMut for CramerShoupAnam<LIMBS, G> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.cramer_shoup
+    }
+}
+
+impl<const LIMBS: usize, G: MCG<LIMBS>> Deref for CramerShoupAnam<LIMBS, G> {
+    type Target = CramerShoup<LIMBS, G>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.cramer_shoup
+    }
 }
 
 impl<const LIMBS: usize, G: MCG<LIMBS>> CramerShoupAnam<LIMBS, G> {
@@ -404,7 +419,7 @@ mod tests_anamorphic {
     #[test]
     fn test_2048_success() {
         let mut cs_anam = CramerShoupAnam::new(256, 256, 256);
-        let (pk, sk) = cs_anam.cramer_shoup.r#gen();
+        let (pk, sk) = cs_anam.r#gen();
         let dk = cs_anam.a_gen(&sk, &pk);
 
         let m = "According to all known laws of aviation, there is no way that a bee should be able to fly. Its wings are too small to get its fat little body off the ground. The bee, of course, flies anyway because bees don't care what humans think is impossible.";
@@ -423,7 +438,7 @@ mod tests_anamorphic {
 
         assert_eq!(cm, cm_dec);
 
-        let m_dec = cs_anam.cramer_shoup.dec(&c, &sk);
+        let m_dec = cs_anam.dec(&c, &sk);
         let mdi = m_dec.to_modq();
         let mdb = bigint_to_bytes(mdi);
         let dec = String::from_utf8(mdb).unwrap();
@@ -435,7 +450,7 @@ mod tests_anamorphic {
     fn test_2048_out_of_range_cm() {
         // try to encrypt with a cm > l, should return None
         let mut cs_anam = CramerShoupAnam::new(256, 256, 256);
-        let (pk, sk) = cs_anam.cramer_shoup.r#gen();
+        let (pk, sk) = cs_anam.r#gen();
         let dk = cs_anam.a_gen(&sk, &pk);
 
         let m = "According to all known laws of aviation, there is no way that a bee should be able to fly. Its wings are too small to get its fat little body off the ground. The bee, of course, flies anyway because bees don't care what humans think is impossible.";
@@ -453,14 +468,14 @@ mod tests_anamorphic {
     fn test_2048_normal_ciphertext() {
         // decrypt a normal ciphertext with the anamorphic decryption, should return None
         let mut cs_anam = CramerShoupAnam::new(256, 256, 256);
-        let (pk, sk) = cs_anam.cramer_shoup.r#gen();
+        let (pk, sk) = cs_anam.r#gen();
         let dk = cs_anam.a_gen(&sk, &pk);
 
         let m = "According to all known laws of aviation, there is no way that a bee should be able to fly. Its wings are too small to get its fat little body off the ground. The bee, of course, flies anyway because bees don't care what humans think is impossible.";
         let mi = bytes_to_bigint(m.as_bytes()).unwrap();
         let mg = Group2048::from_modq(mi).unwrap();
 
-        let c = cs_anam.cramer_shoup.enc(&mg, &pk);
+        let c = cs_anam.enc(&mg, &pk);
         let cm_dec = cs_anam.a_dec(&dk, &c);
         assert!(cm_dec.is_none());
     }

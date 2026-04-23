@@ -3,7 +3,10 @@
 //! This module contains implementations for ElGamal public key encryption in both
 //! normal ([`ElGamal`]) and anamorphic ([`ElGamalAnam`]) modes.
 
-use std::collections::HashMap;
+use std::{
+    collections::HashMap,
+    ops::{Deref, DerefMut},
+};
 
 use crypto_bigint::Uint;
 use rand::{RngExt, SeedableRng, rngs::ChaCha20Rng};
@@ -48,10 +51,26 @@ impl<const LIMBS: usize, G: MCG<LIMBS>> ElGamal<LIMBS, G> {
         rand::rng().random()
     }
 
+    /// Creates a new randomly seeded `ElGamal<LIMBS, G>`
     pub fn new() -> Self {
         Self::new_seeded(Self::gen_seed())
     }
 
+    /// Creates a new seeded `ElGamal<LIMBS, G>`
+    ///
+    /// # Example usage
+    /// ```
+    /// use anamorphic_encryption::pke::PKE;
+    /// use anamorphic_encryption::el_gamal::ElGamal;
+    /// use anamorphic_encryption::groups::GroupTiny;
+    ///
+    /// let seed = [0u8; 32];
+    /// let mut eg1 = ElGamal::<1, GroupTiny>::new_seeded(seed.clone());
+    /// let (pk1, sk1) = eg1.r#gen();
+    /// let mut eg2 = ElGamal::new_seeded(seed);
+    /// let (pk2, sk2) = eg2.r#gen();
+    /// assert_eq!((pk1, sk1), (pk2, sk2));
+    /// ```
     pub fn new_seeded(seed: RandomSeed) -> Self {
         Self {
             rng: ChaCha20Rng::from_seed(seed),
@@ -92,22 +111,71 @@ impl<const LIMBS: usize, G: MCG<LIMBS>> PKE for ElGamal<LIMBS, G> {
     }
 }
 
-/// Params used in AME.
-/// We will not want these numbers to be too large or enc/dec will be painfully slow, u32 should be sufficient
+/// Anamorphic ElGamal PKE is defined over `ElGamal<LIMBS, G>` and parameters `l`, `s` and `t`. `l`
+/// is the size of the covert message space, `s` is the upper bound of randomness variable `x` and
+/// `t` is the upper bound of randomness variable `y`.
+///
+/// Time complexity grows with `O(l⋅s⋅t)`. Anamorphic encryption is too slow to be practical above
+/// sufficiently large paramters, so they are bounded to u32.
+///
+/// # Example usage
+/// ```
+/// use crypto_bigint::{Uint, modular::ConstMontyForm};
+/// use anamorphic_encryption::pke::{PKE, AnamorphicPKE};
+/// use anamorphic_encryption::el_gamal::{ElGamal, ElGamalAnam};
+/// use anamorphic_encryption::groups::{MCG, Group2048};
+/// use anamorphic_encryption::helpers::{bytes_to_bigint, bigint_to_bytes};
+///
+/// let mut eg_anam = ElGamalAnam::new(256, 256, 256);
+/// let (pk, sk) = eg_anam.r#gen();
+/// let dk = eg_anam.a_gen(&sk, &pk);
+///
+/// let m = "According to all known laws of aviation, there is no way that a bee should be able to fly. Its wings are too small to get its fat little body off the ground. The bee, of course, flies anyway because bees don't care what humans think is impossible.";
+/// let mi = bytes_to_bigint(m.as_bytes()).unwrap();
+/// let mg = Group2048::from_modq(mi).unwrap();
+/// let cm: u32 = 114;
+/// let c = eg_anam.a_enc(&dk, &mg, &cm).unwrap();
+///
+/// let cm_dec = eg_anam.a_dec(&dk, &c).unwrap();
+/// assert_eq!(cm, cm_dec);
+///
+/// let m_dec = eg_anam.dec(&c, &sk);
+/// let mdi = m_dec.to_modq();
+/// let mdb = bigint_to_bytes(mdi);
+/// let dec = String::from_utf8(mdb).unwrap();
+/// assert_eq!(m, dec);
+/// ```
 #[derive(Debug)]
 pub struct ElGamalAnam<const LIMBS: usize, G: MCG<LIMBS>> {
     el_gamal: ElGamal<LIMBS, G>,
+
     /// Covert message space size
     l: u32,
+
     /// Upper bound of randomly generated x, 0 < x < s.
     ///
-    /// x adds randomness to the random offset(F(k, x, y)), there will be a possibility of 1/e we never get a matching feature without it.
+    /// x adds randomness to the random offset(F(k, x, y)), there will be a possibility of 1/e we
+    /// never get a matching feature without it.
     s: u32,
 
     /// Upper bound of randomly generated y, 0 < y < t.
     ///
     /// We will require d(2nd part of ciphertext) = d(g^(cm + F(k, x, y))) == y
     t: u32,
+}
+
+impl<const LIMBS: usize, G: MCG<LIMBS>> DerefMut for ElGamalAnam<LIMBS, G> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.el_gamal
+    }
+}
+
+impl<const LIMBS: usize, G: MCG<LIMBS>> Deref for ElGamalAnam<LIMBS, G> {
+    type Target = ElGamal<LIMBS, G>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.el_gamal
+    }
 }
 
 impl<const LIMBS: usize, G: MCG<LIMBS>> ElGamalAnam<LIMBS, G> {
@@ -383,7 +451,7 @@ mod tests_anamorphic {
     #[test]
     fn test_2048_success() {
         let mut eg_anam = ElGamalAnam::new(256, 256, 256);
-        let (pk, sk) = eg_anam.el_gamal.r#gen();
+        let (pk, sk) = eg_anam.r#gen();
         let dk = eg_anam.a_gen(&sk, &pk);
 
         let m = "According to all known laws of aviation, there is no way that a bee should be able to fly. Its wings are too small to get its fat little body off the ground. The bee, of course, flies anyway because bees don't care what humans think is impossible.";
@@ -402,7 +470,7 @@ mod tests_anamorphic {
 
         assert_eq!(cm, cm_dec);
 
-        let m_dec = eg_anam.el_gamal.dec(&c, &sk);
+        let m_dec = eg_anam.dec(&c, &sk);
         let mdi = m_dec.to_modq();
         let mdb = bigint_to_bytes(mdi);
         let dec = String::from_utf8(mdb).unwrap();
@@ -414,7 +482,7 @@ mod tests_anamorphic {
     fn test_2048_out_of_range_cm() {
         // try to encrypt with a cm > l, should return None
         let mut eg_anam = ElGamalAnam::new(256, 256, 256);
-        let (pk, sk) = eg_anam.el_gamal.r#gen();
+        let (pk, sk) = eg_anam.r#gen();
         let dk = eg_anam.a_gen(&sk, &pk);
 
         let m = "According to all known laws of aviation, there is no way that a bee should be able to fly. Its wings are too small to get its fat little body off the ground. The bee, of course, flies anyway because bees don't care what humans think is impossible.";
@@ -432,14 +500,14 @@ mod tests_anamorphic {
     fn test_2048_normal_ciphertext() {
         // decrypt a normal ciphertext with the anamorphic decryption, should return None
         let mut eg_anam = ElGamalAnam::new(256, 256, 256);
-        let (pk, sk) = eg_anam.el_gamal.r#gen();
+        let (pk, sk) = eg_anam.r#gen();
         let dk = eg_anam.a_gen(&sk, &pk);
 
         let m = "According to all known laws of aviation, there is no way that a bee should be able to fly. Its wings are too small to get its fat little body off the ground. The bee, of course, flies anyway because bees don't care what humans think is impossible.";
         let mi = bytes_to_bigint(m.as_bytes()).unwrap();
         let mg = Group2048::from_modq(mi).unwrap();
 
-        let c = eg_anam.el_gamal.enc(&mg, &pk);
+        let c = eg_anam.enc(&mg, &pk);
         let cm_dec = eg_anam.a_dec(&dk, &c);
         assert!(cm_dec.is_none());
     }

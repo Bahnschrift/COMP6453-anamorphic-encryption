@@ -8,6 +8,8 @@
 //! a "parse, don't validate" paradigm -- allowing implementers of these traits to define their own types
 //! which enforce appropriate guarantees (e.g. [`crate::groups::MCG`]).
 
+use std::ops::Deref;
+
 /// Trait defining the functions and associated types required
 /// for public key encryption (PKE).
 ///
@@ -48,7 +50,7 @@ pub trait PKE {
 ///
 /// It augments this existing scheme with three additional functions:
 /// [`AnamorphicPKE::a_gen`], [`AnamorphicPKE::a_enc`], and [`AnamorphicPKE::a_dec`].
-pub trait AnamorphicPKE<P: PKE> {
+pub trait AnamorphicPKE<P: PKE>: Deref<Target = P> {
     /// Double key
     type DK;
 
