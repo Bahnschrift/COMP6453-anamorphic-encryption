@@ -1,3 +1,11 @@
+//! # Groups
+//!
+//! This module defines the `MCG` trait for multiplicative cyclic groups used in ElGamal,
+//! Cramer-Shoup and RSA-OAEP public key cryptography. It also defines the `new_group` macro for
+//! easily generating MCGs of various sizes, generators, and modulus, including the concrete types
+//! `GroupTiny`, `GroupSmall`, `Group2048`, `Group3072` and `Group4096` (the latter 3 taken from
+//! RFC 2409 - 6. Oakley Groups).
+
 use std::ops::Deref;
 
 use crypto_bigint::{

@@ -1,3 +1,8 @@
+//! # Cramer-Shoup PKE
+//!
+//! This module contains implementations for Cramer-Shoup public key encryption in both
+//! normal ([`CramerShoup`]) and anamorphic ([`CramerShoupAnam`]) modes.
+
 use crypto_bigint::Uint;
 use crypto_bigint::modular::ConstMontyForm;
 use rand::{RngExt, SeedableRng, rngs::ChaCha20Rng};
