@@ -61,7 +61,7 @@ pub struct RsaSK<const MOD_LIMBS: usize, const PRIME_LIMBS: usize> {
 /// let mut rsa = RSA::<32, 16>::new();
 /// let (pk, sk) = rsa.r#gen();
 ///
-/// let m = Uint::<32>::from(12345u32);
+/// let m = Uint::<32>::from(18u8);
 /// let c = rsa.enc(&m, &pk);
 /// let d = rsa.dec(&c, &sk);
 /// assert_eq!(m, d);
@@ -121,6 +121,7 @@ impl<const MOD_LIMBS: usize, const PRIME_LIMBS: usize> PKE for RSA<MOD_LIMBS, PR
     type M = Uint<MOD_LIMBS>;
     type C = Uint<MOD_LIMBS>;
 
+    /// Generates a new RSA key pair.
     fn r#gen(&mut self) -> (Self::PK, Self::SK) {
         let e: Uint<1> = Uint::from_u64(65537);
 
@@ -155,8 +156,13 @@ impl<const MOD_LIMBS: usize, const PRIME_LIMBS: usize> PKE for RSA<MOD_LIMBS, PR
             let phi_n_nz = NonZero::new(phi_n).unwrap();
 
             // e and phi(n) should be coprime
-            // since e is prime and we ensured p and q are not factors of e
-            let d = e.resize().invert_mod(&phi_n_nz).unwrap();
+            // Since e is prime and we ensured p and q are not factors of e,
+            // gcd(e, phi(n)) is almost always 1, but if not, we continue to try another pair of primes.
+            let d_opt = e.resize().invert_mod(&phi_n_nz);
+            if d_opt.is_none().into() {
+                continue;
+            }
+            let d = d_opt.unwrap();
 
             // dP = d mod (p - 1)
             let d_p = d.rem(&p_minus_1);
@@ -183,6 +189,11 @@ impl<const MOD_LIMBS: usize, const PRIME_LIMBS: usize> PKE for RSA<MOD_LIMBS, PR
         }
     }
 
+    /// Encrypts a message using the RSA public key.
+    ///
+    /// # Panics
+    /// - Panics if the modulus `n` is even. Standard RSA moduli are always the product
+    ///   of two large primes and thus odd.
     fn enc(&mut self, m: &Self::M, pk: &Self::PK) -> Self::C {
         // C = M^e mod N
         let mod_odd = Odd::new(pk.n).unwrap();
@@ -194,6 +205,10 @@ impl<const MOD_LIMBS: usize, const PRIME_LIMBS: usize> PKE for RSA<MOD_LIMBS, PR
         m_res.pow(&e_mod).retrieve()
     }
 
+    /// Decrypts a ciphertext using the RSA private key (CRT optimized).
+    ///
+    /// # Panics
+    /// - Panics if the prime factors `p` or `q` are even or zero.
     fn dec(&mut self, c: &Self::C, sk: &Self::SK) -> Self::M {
         // CRT-based decryption
         let p_nz = NonZero::new(sk.p.resize::<MOD_LIMBS>()).unwrap();
