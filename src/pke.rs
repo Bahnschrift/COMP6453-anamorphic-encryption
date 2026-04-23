@@ -1,3 +1,15 @@
+//! # PKE Traits
+//!
+//! This module defines traits describing the behaviour of both public key encryption ([`PKE`])
+//! and anamorphic public key encryption ([`AnamorphicPKE`]).
+//!
+//! In particular, an effort has been made to be as generic as possible, allowing manual specification
+//! over which types these are implemented. This provides a lot more flexibility in terms of supporting
+//! a "parse, don't validate" paradigm -- allowing implementers of these traits to define their own types
+//! which enforce appropriate guarantees (e.g. [`crate::groups::MCG`]).
+
+use std::ops::Deref;
+
 /// Trait defining the functions and associated types required
 /// for public key encryption (PKE).
 ///
@@ -38,7 +50,7 @@ pub trait PKE {
 ///
 /// It augments this existing scheme with three additional functions:
 /// [`AnamorphicPKE::a_gen`], [`AnamorphicPKE::a_enc`], and [`AnamorphicPKE::a_dec`].
-pub trait AnamorphicPKE<P: PKE> {
+pub trait AnamorphicPKE<P: PKE>: Deref<Target = P> {
     /// Double key
     type DK;
 
@@ -56,7 +68,7 @@ pub trait AnamorphicPKE<P: PKE> {
     /// requiring `CM` to only contain valid values (and implement an
     /// iter method for `a_gen`), but that will probably make things more
     /// annoying than they need to be.
-    fn a_enc(&mut self, pk: &P::PK, dk: &Self::DK, m: &P::M, cm: &Self::CM) -> Option<P::C>;
+    fn a_enc(&mut self, dk: &Self::DK, m: &P::M, cm: &Self::CM) -> Option<P::C>;
 
     /// Anamorphic decryption.
     ///
