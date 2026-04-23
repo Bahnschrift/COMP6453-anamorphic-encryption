@@ -1,9 +1,8 @@
 use crypto_bigint::Uint;
 use rand::{RngExt, SeedableRng, rngs::ChaCha20Rng};
-use rayon::vec;
 use sha2::{Digest, Sha256};
 
-use crate::pke::PKE;
+use crate::pke::{AnamorphicPKE, PKE};
 use crate::rsa::{RSA, RsaPK, RsaSK};
 
 type RandomSeed = [u8; 32];
@@ -72,24 +71,14 @@ impl<const MOD_LIMBS: usize, const PRIME_LIMBS: usize> RsaOaep<MOD_LIMBS, PRIME_
             rng: ChaCha20Rng::from_seed(seed),
         }
     }
-}
 
-impl<const MOD_LIMBS: usize, const PRIME_LIMBS: usize> PKE for RsaOaep<MOD_LIMBS, PRIME_LIMBS> {
-    type PK = RsaPK<MOD_LIMBS>;
-    type SK = RsaSK<MOD_LIMBS, PRIME_LIMBS>;
-    type M = RsaOaepMsg;
-    type C = RsaOaepCiphertext<MOD_LIMBS>;
-
-    /// Generate a standard RSA key pair, OAEP doesn't change key generation
-    fn r#gen(&mut self) -> (Self::PK, Self::SK) {
-        self.rsa.r#gen()
-    }
-
-    /// RSA-OAEP encryption, adds OAEP padding to the message and encrypts it with standard RSA
-    ///
-    /// # Panics:
-    /// - If the message is too long to fit in the OAEP padding scheme (|m| > k - 2 * |hash| - 2)
-    fn enc(&mut self, Self::M { m, l }: &Self::M, pk: &Self::PK) -> Self::C {
+    /// Encryption with a given seed, can be reused for anamorphic encryption
+    pub(crate) fn enc_with_seed(
+        &mut self,
+        RsaOaepMsg { m, l }: &RsaOaepMsg,
+        pk: &RsaPK<MOD_LIMBS>,
+        seed: [u8; HASH_LEN],
+    ) -> RsaOaepCiphertext<MOD_LIMBS> {
         // We follow the steps given in RFC 8017 Section 7.1.1
 
         // Length checking
@@ -122,10 +111,6 @@ impl<const MOD_LIMBS: usize, const PRIME_LIMBS: usize> PKE for RsaOaep<MOD_LIMBS
         db.push(0x01);
         db.extend_from_slice(m);
 
-        // Generate random octet string seed of length hLen
-        let mut seed = vec![0u8; HASH_LEN];
-        self.rng.fill(&mut seed[..]);
-
         let db_mask = mgf(&seed, k - HASH_LEN - 1);
 
         let masked_db: Vec<u8> = db.iter().zip(db_mask.iter()).map(|(a, b)| a ^ b).collect();
@@ -149,17 +134,18 @@ impl<const MOD_LIMBS: usize, const PRIME_LIMBS: usize> PKE for RsaOaep<MOD_LIMBS
         let em_int = Uint::<MOD_LIMBS>::from_be_slice(&em);
 
         // Encrypt with standard RSA scheme
-        Self::C {
+        RsaOaepCiphertext {
             c: self.rsa.enc(&em_int, pk),
             l: l.clone(),
         }
     }
 
-    /// RSA-OAEP decryption, decrypts with standard RSA and then removes OAEP padding to recover the message
-    ///
-    /// # Panics:
-    /// - If the OAEP padding is invalid
-    fn dec(&mut self, Self::C { c, l }: &Self::C, sk: &Self::SK) -> Self::M {
+    /// Expose decryption that recovers the seed for anamorphic encryption
+    pub(crate) fn dec_recover_seed(
+        &mut self,
+        RsaOaepCiphertext { c, l }: &RsaOaepCiphertext<MOD_LIMBS>,
+        sk: &RsaSK<MOD_LIMBS, PRIME_LIMBS>,
+    ) -> (RsaOaepMsg, [u8; HASH_LEN]) {
         // Still following RFC 8017 Section 7.1.2
 
         // Length checking
@@ -220,16 +206,137 @@ impl<const MOD_LIMBS: usize, const PRIME_LIMBS: usize> PKE for RsaOaep<MOD_LIMBS
             panic!("decryption error");
         }
 
+        let mut out_seed = [0u8; HASH_LEN];
+        out_seed.copy_from_slice(&seed);
+
         // Extract original message M
-        Self::M {
-            m: db[separator_idx + 1..].to_vec(),
-            l: l.clone(),
+        (
+            RsaOaepMsg {
+                m: db[separator_idx + 1..].to_vec(),
+                l: l.clone(),
+            },
+            out_seed,
+        )
+    }
+}
+
+impl<const MOD_LIMBS: usize, const PRIME_LIMBS: usize> PKE for RsaOaep<MOD_LIMBS, PRIME_LIMBS> {
+    type PK = RsaPK<MOD_LIMBS>;
+    type SK = RsaSK<MOD_LIMBS, PRIME_LIMBS>;
+    type M = RsaOaepMsg;
+    type C = RsaOaepCiphertext<MOD_LIMBS>;
+
+    /// Generate a standard RSA key pair, OAEP doesn't change key generation
+    fn r#gen(&mut self) -> (Self::PK, Self::SK) {
+        self.rsa.r#gen()
+    }
+
+    /// RSA-OAEP encryption, adds OAEP padding to the message and encrypts it with standard RSA
+    ///
+    /// # Panics:
+    /// - If the message is too long to fit in the OAEP padding scheme (|m| > k - 2 * |hash| - 2)
+    fn enc(&mut self, m_struct: &Self::M, pk: &Self::PK) -> Self::C {
+        let mut seed = [0u8; HASH_LEN];
+        self.rng.fill(&mut seed[..]);
+        self.enc_with_seed(m_struct, pk, seed)
+    }
+
+    /// RSA-OAEP decryption, decrypts with standard RSA and then removes OAEP padding to recover the message
+    ///
+    /// # Panics:
+    /// - If the OAEP padding is invalid
+    fn dec(&mut self, c: &Self::C, sk: &Self::SK) -> Self::M {
+        let (m, _seed) = self.dec_recover_seed(c, sk);
+        m
+    }
+}
+
+pub struct RsaOaepDK<SK> {
+    pub sk: SK,
+    pub k: [u8; HASH_LEN],
+    pub ctr: std::sync::atomic::AtomicU64,
+}
+
+/// RSA-OAEP described in section 5.3 of the paper.
+/// This is synchronized
+pub struct RsaOaepAnam<const MOD_LIMBS: usize, const PRIME_LIMBS: usize> {
+    pub rsa_oaep: RsaOaep<MOD_LIMBS, PRIME_LIMBS>,
+}
+
+impl<const MOD_LIMBS: usize, const PRIME_LIMBS: usize> RsaOaepAnam<MOD_LIMBS, PRIME_LIMBS> {
+    pub fn new() -> Self {
+        Self {
+            rsa_oaep: RsaOaep::new(),
+        }
+    }
+
+    pub fn new_seeded(seed: RandomSeed) -> Self {
+        Self {
+            rsa_oaep: RsaOaep::new_seeded(seed),
         }
     }
 }
 
+impl<const MOD_LIMBS: usize, const PRIME_LIMBS: usize>
+    AnamorphicPKE<RsaOaep<MOD_LIMBS, PRIME_LIMBS>> for RsaOaepAnam<MOD_LIMBS, PRIME_LIMBS>
+{
+    type DK = RsaOaepDK<RsaSK<MOD_LIMBS, PRIME_LIMBS>>;
+    type CM = [u8; HASH_LEN];
+
+    fn a_gen(&mut self, sk: &RsaSK<MOD_LIMBS, PRIME_LIMBS>, pk: &RsaPK<MOD_LIMBS>) -> Self::DK {
+        let mut k = [0u8; HASH_LEN];
+        self.rsa_oaep.rng.fill(&mut k[..]);
+
+        RsaOaepDK {
+            sk: sk.clone(),
+            k,
+            ctr: std::sync::atomic::AtomicU64::new(0),
+        }
+    }
+
+    fn a_enc(
+        &mut self,
+        pk: &RsaPK<MOD_LIMBS>,
+        dk: &Self::DK,
+        m: &RsaOaepMsg,
+        cm: &Self::CM,
+    ) -> Option<RsaOaepCiphertext<MOD_LIMBS>> {
+        let ctr = dk.ctr.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let mut hasher = HASHER::new();
+        hasher.update(&dk.k);
+        hasher.update(&ctr.to_be_bytes());
+        let t: [u8; HASH_LEN] = hasher.finalize().into();
+
+        // seed = cm xor t
+        let mut seed = [0u8; HASH_LEN];
+        for i in 0..HASH_LEN {
+            seed[i] = cm[i] ^ t[i];
+        }
+
+        Some(self.rsa_oaep.enc_with_seed(m, pk, seed))
+    }
+
+    fn a_dec(&mut self, dk: &Self::DK, c: &RsaOaepCiphertext<MOD_LIMBS>) -> Option<Self::CM> {
+        let (_m, seed) = self.rsa_oaep.dec_recover_seed(c, &dk.sk);
+
+        let ctr = dk.ctr.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let mut hasher = HASHER::new();
+        hasher.update(&dk.k);
+        hasher.update(&ctr.to_be_bytes());
+        let t: [u8; HASH_LEN] = hasher.finalize().into();
+
+        // cm = seed xor t
+        let mut cm = [0u8; HASH_LEN];
+        for i in 0..HASH_LEN {
+            cm[i] = seed[i] ^ t[i];
+        }
+
+        Some(cm)
+    }
+}
+
 #[cfg(test)]
-mod tests {
+mod tests_normal {
     use super::*;
 
     #[test]
@@ -261,5 +368,38 @@ mod tests {
         let ciphertext2 = rsa_oaep.enc(&msg, &pk);
         // They shouldn't be the same since OAEP introduced randomness
         assert_ne!(ciphertext1.c, ciphertext2.c);
+    }
+}
+
+#[cfg(test)]
+mod tests_anamorphic {
+    use super::*;
+
+    #[test]
+    fn test_rsa_oaep_anamorphic() {
+        let mut rsa_oaep_anam = RsaOaepAnam::<32, 16>::new_seeded([42u8; 32]);
+        let (pk, sk) = rsa_oaep_anam.rsa_oaep.r#gen();
+
+        let dk = rsa_oaep_anam.a_gen(&sk, &pk);
+        let msg = RsaOaepMsg {
+            m: b"Cover story".to_vec(),
+            l: b"Optional label".to_vec(),
+        };
+        let cm = [67u8; 32];
+
+        let c = rsa_oaep_anam.a_enc(&pk, &dk, &msg, &cm).unwrap();
+
+        let d = rsa_oaep_anam.rsa_oaep.dec(&c, &sk);
+        assert_eq!(d.m, msg.m);
+
+        // We need another DK to decrypt since CTR increments
+        let dk_recv = RsaOaepDK {
+            sk: sk.clone(),
+            k: dk.k.clone(),
+            ctr: std::sync::atomic::AtomicU64::new(0),
+        };
+
+        let cm_d = rsa_oaep_anam.a_dec(&dk_recv, &c).unwrap();
+        assert_eq!(cm_d, cm);
     }
 }

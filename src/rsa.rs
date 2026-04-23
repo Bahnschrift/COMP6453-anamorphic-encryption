@@ -12,6 +12,7 @@ use crate::pke::PKE;
 type RandomSeed = [u8; 32];
 
 /// RSA public key
+#[derive(Clone, Debug)]
 pub struct RsaPK<const MOD_LIMBS: usize> {
     /// Modulus
     n: Uint<MOD_LIMBS>,
@@ -21,6 +22,7 @@ pub struct RsaPK<const MOD_LIMBS: usize> {
 
 /// RSA private key, fields are from the second private key representation given by RFC8017, section 3.2
 /// We use snake case for some fields since this is in Rust
+#[derive(Clone, Debug)]
 pub struct RsaSK<const MOD_LIMBS: usize, const PRIME_LIMBS: usize> {
     /// The first factor
     p: Uint<PRIME_LIMBS>,
@@ -50,12 +52,15 @@ impl<const MOD_LIMBS: usize, const PRIME_LIMBS: usize> RSA<MOD_LIMBS, PRIME_LIMB
     );
 
     pub fn new() -> Self {
+        // Trigger the compile-time assertion
+        let _ = Self::ASSERT_LIMBS_RATIO;
         Self {
             rng: ChaCha20Rng::from_seed(rand::rng().random()),
         }
     }
 
     pub fn new_seeded(seed: RandomSeed) -> Self {
+        let _ = Self::ASSERT_LIMBS_RATIO;
         Self {
             rng: ChaCha20Rng::from_seed(seed),
         }
