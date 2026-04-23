@@ -36,11 +36,19 @@ pub struct RsaSK<const MOD_LIMBS: usize, const PRIME_LIMBS: usize> {
 }
 
 /// Standard RSA implementation
+///
+/// # Panics:
+/// - Panics at compile time if the modulus size is not at least twice the prime size.
 pub struct RSA<const MOD_LIMBS: usize, const PRIME_LIMBS: usize> {
     rng: ChaCha20Rng,
 }
 
 impl<const MOD_LIMBS: usize, const PRIME_LIMBS: usize> RSA<MOD_LIMBS, PRIME_LIMBS> {
+    const ASSERT_LIMBS_RATIO: () = assert!(
+        MOD_LIMBS >= 2 * PRIME_LIMBS,
+        "Modulus must be at least twice the size of the prime factors"
+    );
+
     pub fn new() -> Self {
         Self {
             rng: ChaCha20Rng::from_seed(rand::rng().random()),
@@ -55,13 +63,14 @@ impl<const MOD_LIMBS: usize, const PRIME_LIMBS: usize> RSA<MOD_LIMBS, PRIME_LIMB
 }
 
 impl<const MOD_LIMBS: usize, const PRIME_LIMBS: usize> PKE for RSA<MOD_LIMBS, PRIME_LIMBS> {
+    // RSA is not based on a cyclic group so G won't come in handy here...
     type PK = RsaPK<MOD_LIMBS>;
     type SK = RsaSK<MOD_LIMBS, PRIME_LIMBS>;
     type M = Uint<MOD_LIMBS>;
     type C = Uint<MOD_LIMBS>;
 
     fn r#gen(&mut self) -> (Self::PK, Self::SK) {
-        // We will just hardcode e like everyone else does
+        // Hardcode e like everyone else does
         let e: Uint<1> = Uint::from_u64(65537);
 
         loop {
