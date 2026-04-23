@@ -1,9 +1,9 @@
+use crate::pke::{AnamorphicPKE, PKE};
+use crate::rsa::{RSA, RsaPK, RsaSK};
 use crypto_bigint::Uint;
 use rand::{RngExt, SeedableRng, rngs::ChaCha20Rng};
 use sha2::{Digest, Sha256};
-
-use crate::pke::{AnamorphicPKE, PKE};
-use crate::rsa::{RSA, RsaPK, RsaSK};
+use std::ops::Deref;
 
 type RandomSeed = [u8; 32];
 type HASHER = Sha256;
@@ -251,8 +251,9 @@ impl<const MOD_LIMBS: usize, const PRIME_LIMBS: usize> PKE for RsaOaep<MOD_LIMBS
     }
 }
 
-pub struct RsaOaepDK<SK> {
-    pub sk: SK,
+pub struct RsaOaepDK<const MOD_LIMBS: usize, const PRIME_LIMBS: usize> {
+    pub pk: RsaPK<MOD_LIMBS>,
+    pub sk: RsaSK<MOD_LIMBS, PRIME_LIMBS>,
     pub k: [u8; HASH_LEN],
     pub ctr: std::sync::atomic::AtomicU64,
 }
@@ -261,6 +262,16 @@ pub struct RsaOaepDK<SK> {
 /// This is synchronized
 pub struct RsaOaepAnam<const MOD_LIMBS: usize, const PRIME_LIMBS: usize> {
     pub rsa_oaep: RsaOaep<MOD_LIMBS, PRIME_LIMBS>,
+}
+
+impl<const MOD_LIMBS: usize, const PRIME_LIMBS: usize> Deref
+    for RsaOaepAnam<MOD_LIMBS, PRIME_LIMBS>
+{
+    type Target = RsaOaep<MOD_LIMBS, PRIME_LIMBS>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.rsa_oaep
+    }
 }
 
 impl<const MOD_LIMBS: usize, const PRIME_LIMBS: usize> RsaOaepAnam<MOD_LIMBS, PRIME_LIMBS> {
@@ -280,7 +291,7 @@ impl<const MOD_LIMBS: usize, const PRIME_LIMBS: usize> RsaOaepAnam<MOD_LIMBS, PR
 impl<const MOD_LIMBS: usize, const PRIME_LIMBS: usize>
     AnamorphicPKE<RsaOaep<MOD_LIMBS, PRIME_LIMBS>> for RsaOaepAnam<MOD_LIMBS, PRIME_LIMBS>
 {
-    type DK = RsaOaepDK<RsaSK<MOD_LIMBS, PRIME_LIMBS>>;
+    type DK = RsaOaepDK<MOD_LIMBS, PRIME_LIMBS>;
     type CM = [u8; HASH_LEN];
 
     fn a_gen(&mut self, sk: &RsaSK<MOD_LIMBS, PRIME_LIMBS>, pk: &RsaPK<MOD_LIMBS>) -> Self::DK {
@@ -289,6 +300,7 @@ impl<const MOD_LIMBS: usize, const PRIME_LIMBS: usize>
 
         RsaOaepDK {
             sk: sk.clone(),
+            pk: pk.clone(),
             k,
             ctr: std::sync::atomic::AtomicU64::new(0),
         }
@@ -296,7 +308,6 @@ impl<const MOD_LIMBS: usize, const PRIME_LIMBS: usize>
 
     fn a_enc(
         &mut self,
-        pk: &RsaPK<MOD_LIMBS>,
         dk: &Self::DK,
         m: &RsaOaepMsg,
         cm: &Self::CM,
@@ -313,7 +324,7 @@ impl<const MOD_LIMBS: usize, const PRIME_LIMBS: usize>
             seed[i] = cm[i] ^ t[i];
         }
 
-        Some(self.rsa_oaep.enc_with_seed(m, pk, seed))
+        Some(self.rsa_oaep.enc_with_seed(m, &dk.pk, seed))
     }
 
     fn a_dec(&mut self, dk: &Self::DK, c: &RsaOaepCiphertext<MOD_LIMBS>) -> Option<Self::CM> {
@@ -387,7 +398,7 @@ mod tests_anamorphic {
         };
         let cm = [67u8; 32];
 
-        let c = rsa_oaep_anam.a_enc(&pk, &dk, &msg, &cm).unwrap();
+        let c = rsa_oaep_anam.a_enc(&dk, &msg, &cm).unwrap();
 
         let d = rsa_oaep_anam.rsa_oaep.dec(&c, &sk);
         assert_eq!(d.m, msg.m);
@@ -395,6 +406,7 @@ mod tests_anamorphic {
         // We need another DK to decrypt since CTR increments
         let dk_recv = RsaOaepDK {
             sk: sk.clone(),
+            pk: pk.clone(),
             k: dk.k.clone(),
             ctr: std::sync::atomic::AtomicU64::new(0),
         };
