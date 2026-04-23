@@ -367,7 +367,7 @@ impl<const LIMBS: usize, G: MCG<LIMBS> + Clone + Send + Sync> AnamorphicPKE<Cram
             return None;
         }
 
-        // Find a valid pair of x and y and corresponding ciphertext using reject sampling
+        // Find a valid pair of x and y and corresponding ciphertext using rejection sampling
         // We used rayon to speed this up
         let result = (0..self.s)
             .into_par_iter()

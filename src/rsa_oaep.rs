@@ -316,7 +316,7 @@ pub struct RsaOaepDK<const MOD_LIMBS: usize, const PRIME_LIMBS: usize> {
 /// Anamorphic RSA-OAEP scheme as described in Section 5.3 of the paper.
 ///
 /// This is a synchronized anamorphic scheme that is much more efficient than the Anamorphic
-/// ElGamal or Cramer-Shoup scheme in our implementation because it does not require reject
+/// ElGamal or Cramer-Shoup scheme in our implementation because it does not require rejection
 /// sampling. The covert message length is determined by the output size of the chosen hash
 /// function (e.g. 20 bytes for SHA-1) so it does not contain a `l` parameter.
 ///
