@@ -12,7 +12,7 @@ use crypto_bigint::Uint;
 use rand::{RngExt, SeedableRng, rngs::ChaCha20Rng};
 use sha2::digest::{Digest, FixedOutputReset};
 use std::marker::PhantomData;
-use std::ops::Deref;
+use std::ops::{Deref, DerefMut};
 
 type RandomSeed = [u8; 32];
 
@@ -355,6 +355,14 @@ pub struct RsaOaepAnam<
     H: Digest + FixedOutputReset,
 > {
     pub rsa_oaep: RsaOaep<MOD_LIMBS, PRIME_LIMBS, H>,
+}
+
+impl<const MOD_LIMBS: usize, const PRIME_LIMBS: usize, H: Digest + FixedOutputReset> DerefMut
+    for RsaOaepAnam<MOD_LIMBS, PRIME_LIMBS, H>
+{
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.rsa_oaep
+    }
 }
 
 impl<const MOD_LIMBS: usize, const PRIME_LIMBS: usize, H: Digest + FixedOutputReset> Deref
