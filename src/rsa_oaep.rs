@@ -123,15 +123,11 @@ impl<const MOD_LIMBS: usize, const PRIME_LIMBS: usize, H: Digest + FixedOutputRe
         seed: &[u8],
     ) -> RsaOaepCiphertext<MOD_LIMBS> {
         // We follow the steps given in RFC 8017 Section 7.1.1
+        // Skipping the length checks designed for SHA-1 since we don't intend to support it.
 
         // Length checking
         let k = Uint::<MOD_LIMBS>::BYTES;
         let h_len = <H as Digest>::output_size();
-
-        // Ensure label is not too long for SHA-1
-        if l.len() as u64 > (1u64 << 61) - 1 {
-            panic!("label too long");
-        }
 
         if seed.len() != h_len {
             panic!("invalid seed length");
@@ -197,13 +193,9 @@ impl<const MOD_LIMBS: usize, const PRIME_LIMBS: usize, H: Digest + FixedOutputRe
         RsaOaepCiphertext { c, l }: &RsaOaepCiphertext<MOD_LIMBS>,
         sk: &RsaSK<MOD_LIMBS, PRIME_LIMBS>,
     ) -> (RsaOaepMsg, Vec<u8>) {
+        // We skipped the length checks designed for SHA-1 since we don't intend to support it.
         let k = Uint::<MOD_LIMBS>::BYTES;
         let h_len = <H as Digest>::output_size();
-
-        // About 2000 PB, but since the RFC required this check...
-        if l.len() as u64 > (1u64 << 61) - 1 {
-            panic!("decryption error");
-        }
 
         if k < 2 * h_len + 2 {
             panic!("decryption error");
@@ -318,7 +310,7 @@ pub struct RsaOaepDK<const MOD_LIMBS: usize, const PRIME_LIMBS: usize> {
 /// This is a synchronized anamorphic scheme that is much more efficient than the Anamorphic
 /// ElGamal or Cramer-Shoup scheme in our implementation because it does not require rejection
 /// sampling. The covert message length is determined by the output size of the chosen hash
-/// function (e.g. 20 bytes for SHA-1) so it does not contain a `l` parameter.
+/// function (e.g. 32 bytes for SHA-256) so it does not contain a `l` parameter.
 ///
 /// # Example usage
 /// ```
@@ -456,23 +448,7 @@ impl<const MOD_LIMBS: usize, const PRIME_LIMBS: usize, H: Digest + FixedOutputRe
 #[cfg(test)]
 mod tests_normal {
     use super::*;
-    use sha1::Sha1;
     use sha2::{Sha256, Sha384, Sha512};
-
-    #[test]
-    fn test_rsa_oaep_2048_sha1() {
-        let mut rsa_oaep = RsaOaep::<32, 16, Sha1>::new();
-        let (pk, sk) = rsa_oaep.r#gen();
-
-        let msg = RsaOaepMsg {
-            m: b"SHA-1 test".to_vec(),
-            l: b"label".to_vec(),
-        };
-        let c = rsa_oaep.enc(&msg, &pk);
-        let d = rsa_oaep.dec(&c, &sk);
-
-        assert_eq!(msg.m, d.m);
-    }
 
     #[test]
     fn test_rsa_oaep_2048_sha256() {
@@ -538,36 +514,7 @@ mod tests_normal {
 #[cfg(test)]
 mod tests_anamorphic {
     use super::*;
-    use sha1::Sha1;
     use sha2::{Sha256, Sha512};
-
-    #[test]
-    fn test_rsa_oaep_anamorphic_sha1() {
-        let mut rsa_oaep_anam = RsaOaepAnam::<32, 16, Sha1>::new();
-        let (pk, sk) = rsa_oaep_anam.rsa_oaep.r#gen();
-
-        let dk = rsa_oaep_anam.a_gen(&sk, &pk);
-        let msg = RsaOaepMsg {
-            m: b"message".to_vec(),
-            l: b"label".to_vec(),
-        };
-        let cm = vec![255u8; 20];
-
-        let c = rsa_oaep_anam.a_enc(&dk, &msg, &cm).unwrap();
-
-        let d = rsa_oaep_anam.rsa_oaep.dec(&c, &sk);
-        assert_eq!(d.m, msg.m);
-
-        let dk_recv = RsaOaepDK {
-            sk: sk.clone(),
-            pk: pk.clone(),
-            k: dk.k.clone(),
-            ctr: std::sync::atomic::AtomicU64::new(0),
-        };
-
-        let cm_d = rsa_oaep_anam.a_dec(&dk_recv, &c).unwrap();
-        assert_eq!(cm_d, cm);
-    }
 
     #[test]
     fn test_rsa_oaep_anamorphic_sha256() {
