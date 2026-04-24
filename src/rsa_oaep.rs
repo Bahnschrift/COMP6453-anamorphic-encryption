@@ -53,8 +53,8 @@ pub struct RsaOaepMsg {
 
 /// RSA-OAEP ciphertext and label
 pub struct RsaOaepCiphertext<const MOD_LIMBS: usize> {
-    c: Uint<MOD_LIMBS>,
-    l: Vec<u8>,
+    pub c: Uint<MOD_LIMBS>,
+    pub l: Vec<u8>,
 }
 
 /// RSA-OAEP or RSAES-OAEP in RFC 8017 Section 7.1, based on the regular RSA PKE scheme.
