@@ -1,7 +1,6 @@
 use anamorphic_encryption::pke::{AnamorphicPKE, PKE};
 use anamorphic_encryption::rsa_oaep::{RsaOaep, RsaOaepAnam, RsaOaepMsg};
-use sha1::Sha1;
-use sha2::{Sha256, Sha512};
+use sha2::{Sha256, Sha384, Sha512};
 
 use crate::bench_utils::PkeBenchProvider;
 
@@ -50,7 +49,7 @@ impl PkeBenchProvider for BenchRsaOaep2048Sha256 {
     }
 
     /// RSA-OAEP specific benchmarks:
-    ///   1. Hash-function sweep (SHA-1 / SHA-256 / SHA-512) at 2048-bit modulus.
+    ///   1. Hash-function sweep (SHA-256 / SHA-384 / SHA-512) at 2048-bit modulus.
     ///   2. Modulus-size sweep (2048 / 3072 / 4096) at SHA-256.
     ///   3. Corrected covert-channel throughput. The generic `bench_throughput` in
     ///      bench_utils computes covert bits as `log2(l)`, which for `l=256` gives 8
@@ -73,13 +72,9 @@ impl PkeBenchProvider for BenchRsaOaep2048Sha256 {
                 };
                 let cm = vec![42u8; $cm_len];
 
-                $group.bench_with_input(
-                    BenchmarkId::new("a_enc", $label),
-                    &(),
-                    |b, _| {
-                        b.iter(|| anam.a_enc(black_box(&dk), black_box(&msg), black_box(&cm)))
-                    },
-                );
+                $group.bench_with_input(BenchmarkId::new("a_enc", $label), &(), |b, _| {
+                    b.iter(|| anam.a_enc(black_box(&dk), black_box(&msg), black_box(&cm)))
+                });
 
                 // The counter in dk increments on every a_enc. For the a_dec bench we
                 // generate one ciphertext up front; a_dec will XOR-recover a different
@@ -89,11 +84,9 @@ impl PkeBenchProvider for BenchRsaOaep2048Sha256 {
                     .a_enc(&dk, &msg, &cm)
                     .expect("a_enc failed during bench setup");
 
-                $group.bench_with_input(
-                    BenchmarkId::new("a_dec", $label),
-                    &(),
-                    |b, _| b.iter(|| anam.a_dec(black_box(&dk), black_box(&cipher))),
-                );
+                $group.bench_with_input(BenchmarkId::new("a_dec", $label), &(), |b, _| {
+                    b.iter(|| anam.a_dec(black_box(&dk), black_box(&cipher)))
+                });
             }};
         }
 
@@ -102,17 +95,17 @@ impl PkeBenchProvider for BenchRsaOaep2048Sha256 {
         hash_group.sample_size(10);
         run_anam_case!(
             hash_group,
-            "Sha1",
-            RsaOaep<32, 16, Sha1>,
-            RsaOaepAnam<32, 16, Sha1>,
-            20
-        );
-        run_anam_case!(
-            hash_group,
             "Sha256",
             RsaOaep<32, 16, Sha256>,
             RsaOaepAnam<32, 16, Sha256>,
             32
+        );
+        run_anam_case!(
+            hash_group,
+            "Sha384",
+            RsaOaep<32, 16, Sha384>,
+            RsaOaepAnam<32, 16, Sha384>,
+            48
         );
         run_anam_case!(
             hash_group,
