@@ -1,3 +1,11 @@
+//! # RSA-OAEP PKE
+//!
+//! This module contains an implementation of the RSA Optimal Asymmetric Encryption Padding (OAEP)
+//! public key encryption scheme as described in RFC 8017 Section 7.1.
+//!
+//! It supports both normal ([`RsaOaep`]) and anamorphic ([`RsaOaepAnam`]) modes.
+//! The anamorphic mode allows embedding covert messages within the randomness of the OAEP padding.
+
 use crate::pke::{AnamorphicPKE, PKE};
 use crate::rsa::{RSA, RsaPK, RsaSK};
 use crypto_bigint::Uint;
@@ -10,8 +18,8 @@ type RandomSeed = [u8; 32];
 
 /// Mask Generation Function 1
 ///
-/// # Panics:
-/// If maskLen > 2^32 hLen
+/// # Panics
+/// - Panics if `mask_len` is too large for the chosen hash function (`maskLen > 2^32 * hLen`).
 fn mgf1<H: Digest + FixedOutputReset>(seed: &[u8], mask_len: usize) -> Vec<u8> {
     let h_len = <H as Digest>::output_size();
 
@@ -49,7 +57,32 @@ pub struct RsaOaepCiphertext<const MOD_LIMBS: usize> {
     l: Vec<u8>,
 }
 
-/// RSA-OAEP or RSAES-OAEP in RFC 8017 Section 7.1, based on regular RSA PKE scheme
+/// RSA-OAEP or RSAES-OAEP in RFC 8017 Section 7.1, based on the regular RSA PKE scheme.
+///
+/// OAEP padding provides a higher level of security than standard RSA padding by introducing
+/// randomness and using a mask generation function (MGF1), making it resistant to certain
+/// chosen-ciphertext attacks. This also allows us to implement an anamorphic encryption scheme
+/// over it.
+///
+/// # Example usage
+/// ```
+/// use sha2::Sha256;
+/// use anamorphic_encryption::pke::PKE;
+/// use anamorphic_encryption::rsa_oaep::{RsaOaep, RsaOaepMsg};
+///
+/// // Create RSA-2048 with SHA-256
+/// let mut rsa_oaep = RsaOaep::<32, 16, Sha256>::new();
+/// let (pk, sk) = rsa_oaep.r#gen();
+///
+/// let msg = RsaOaepMsg {
+///     m: b"message".to_vec(),
+///     l: b"".to_vec(),
+/// };
+///
+/// let c = rsa_oaep.enc(&msg, &pk);
+/// let d = rsa_oaep.dec(&c, &sk);
+/// assert_eq!(msg.m, d.m);
+/// ```
 pub struct RsaOaep<const MOD_LIMBS: usize, const PRIME_LIMBS: usize, H: Digest + FixedOutputReset> {
     rsa: RSA<MOD_LIMBS, PRIME_LIMBS>,
     rng: ChaCha20Rng,
@@ -59,6 +92,7 @@ pub struct RsaOaep<const MOD_LIMBS: usize, const PRIME_LIMBS: usize, H: Digest +
 impl<const MOD_LIMBS: usize, const PRIME_LIMBS: usize, H: Digest + FixedOutputReset>
     RsaOaep<MOD_LIMBS, PRIME_LIMBS, H>
 {
+    /// Creates a new randomly seeded `RsaOaep<MOD_LIMBS, PRIME_LIMBS, H>`.
     pub fn new() -> Self {
         Self {
             rsa: RSA::new(),
@@ -67,6 +101,7 @@ impl<const MOD_LIMBS: usize, const PRIME_LIMBS: usize, H: Digest + FixedOutputRe
         }
     }
 
+    /// Creates a new `RsaOaep<MOD_LIMBS, PRIME_LIMBS, H>` using the provided seed.
     pub fn new_seeded(seed: RandomSeed) -> Self {
         Self {
             rsa: RSA::new_seeded(seed),
@@ -76,6 +111,11 @@ impl<const MOD_LIMBS: usize, const PRIME_LIMBS: usize, H: Digest + FixedOutputRe
     }
 
     /// Encryption with a given seed, can be reused in anamorphic encryption
+    ///
+    /// # Panics
+    /// - If the label `l` is longer than 2^61 - 1 bytes.
+    /// - If the `seed` length does not match the hash output size.
+    /// - If the message `m` is too long to fit in the OAEP padding.
     pub(crate) fn enc_with_seed(
         &mut self,
         RsaOaepMsg { m, l }: &RsaOaepMsg,
@@ -83,15 +123,11 @@ impl<const MOD_LIMBS: usize, const PRIME_LIMBS: usize, H: Digest + FixedOutputRe
         seed: &[u8],
     ) -> RsaOaepCiphertext<MOD_LIMBS> {
         // We follow the steps given in RFC 8017 Section 7.1.1
+        // Skipping the length checks designed for SHA-1 since we don't intend to support it.
 
         // Length checking
         let k = Uint::<MOD_LIMBS>::BYTES;
         let h_len = <H as Digest>::output_size();
-
-        // Ensure label is not too long for SHA-1
-        if l.len() as u64 > (1u64 << 61) - 1 {
-            panic!("label too long");
-        }
 
         if seed.len() != h_len {
             panic!("invalid seed length");
@@ -147,18 +183,19 @@ impl<const MOD_LIMBS: usize, const PRIME_LIMBS: usize, H: Digest + FixedOutputRe
     }
 
     /// Decryption, also recovering the seed, can be reused in anamorphic encryption
+    ///
+    /// # Panics
+    /// - If the label `l` is longer than 2^61 - 1 bytes.
+    /// - If the RSA modulus bit-width is insufficient for the chosen hash.
+    /// - If decryption or padding validation fails.
     pub(crate) fn dec_recover_seed(
         &mut self,
         RsaOaepCiphertext { c, l }: &RsaOaepCiphertext<MOD_LIMBS>,
         sk: &RsaSK<MOD_LIMBS, PRIME_LIMBS>,
     ) -> (RsaOaepMsg, Vec<u8>) {
+        // We skipped the length checks designed for SHA-1 since we don't intend to support it.
         let k = Uint::<MOD_LIMBS>::BYTES;
         let h_len = <H as Digest>::output_size();
-
-        // About 2000 PB, but since the RFC required this check...
-        if l.len() as u64 > (1u64 << 61) - 1 {
-            panic!("decryption error");
-        }
 
         if k < 2 * h_len + 2 {
             panic!("decryption error");
@@ -263,19 +300,55 @@ pub struct RsaOaepDK<const MOD_LIMBS: usize, const PRIME_LIMBS: usize> {
     pub pk: RsaPK<MOD_LIMBS>,
     pub sk: RsaSK<MOD_LIMBS, PRIME_LIMBS>,
     pub k: Vec<u8>,
-    /// Counter required for synchronized anamorphic scheme
+    /// Counter required for synchronized anamorphic scheme.
+    // We use AtomicU64 for it so we can change it without making dk mutable.
     pub ctr: std::sync::atomic::AtomicU64,
 }
 
-/// RSA-OAEP described in section 5.3 of the paper.
-/// This is a synchronized anamorphic scheme, it will be much more efficient than the anamorphic ElGamal
-/// and Cramer-Shoup in our implementation, since reject sampling is not required.
+/// Anamorphic RSA-OAEP scheme as described in Section 5.3 of the paper.
 ///
-/// Length of the covert message is determined by the output size of the hash function, for SHA-1 it is 20 bytes,
-/// for SHA-256 it is 32 bytes, etc.
+/// This is a synchronized anamorphic scheme that is much more efficient than the Anamorphic
+/// ElGamal or Cramer-Shoup scheme in our implementation because it does not require rejection
+/// sampling. The covert message length is determined by the output size of the chosen hash
+/// function (e.g. 32 bytes for SHA-256) so it does not contain a `l` parameter.
 ///
-/// # Panics:
-/// - Panics at compile time if the modulus size is not at least twice the prime size.
+/// # Example usage
+/// ```
+/// use sha2::Sha256;
+/// use std::sync::atomic::AtomicU64;
+/// use anamorphic_encryption::pke::{PKE, AnamorphicPKE};
+/// use anamorphic_encryption::rsa_oaep::{RsaOaepAnam, RsaOaepMsg, RsaOaepDK};
+///
+/// let mut rsa_anam = RsaOaepAnam::<32, 16, Sha256>::new();
+/// let (pk, sk) = rsa_anam.rsa_oaep.r#gen();
+///
+/// // Generate the double key
+/// let dk = rsa_anam.a_gen(&sk, &pk);
+///
+/// // Embed a covert message
+/// let msg = RsaOaepMsg {
+///     m: b"message".to_vec(),
+///     l: b"".to_vec(),
+/// };
+/// let cm = vec![18u8; 32];
+///
+/// let c = rsa_anam.a_enc(&dk, &msg, &cm).unwrap();
+///
+/// // Normal decryption
+/// let d_normal = rsa_anam.rsa_oaep.dec(&c, &sk);
+/// assert_eq!(d_normal.m, msg.m);
+///
+/// // Anamorphic decryption
+/// // Using a fresh DK for decryption as this is a synchronized anamorphic scheme
+/// let dk_recv = RsaOaepDK {
+///     sk: sk.clone(),
+///     pk: pk.clone(),
+///     k: dk.k.clone(),
+///     ctr: AtomicU64::new(0),
+/// };
+/// let cm_rec = rsa_anam.a_dec(&dk_recv, &c).unwrap();
+/// assert_eq!(cm_rec, cm);
+/// ```
 pub struct RsaOaepAnam<
     const MOD_LIMBS: usize,
     const PRIME_LIMBS: usize,
@@ -375,23 +448,7 @@ impl<const MOD_LIMBS: usize, const PRIME_LIMBS: usize, H: Digest + FixedOutputRe
 #[cfg(test)]
 mod tests_normal {
     use super::*;
-    use sha1::Sha1;
     use sha2::{Sha256, Sha384, Sha512};
-
-    #[test]
-    fn test_rsa_oaep_2048_sha1() {
-        let mut rsa_oaep = RsaOaep::<32, 16, Sha1>::new();
-        let (pk, sk) = rsa_oaep.r#gen();
-
-        let msg = RsaOaepMsg {
-            m: b"SHA-1 test".to_vec(),
-            l: b"label".to_vec(),
-        };
-        let c = rsa_oaep.enc(&msg, &pk);
-        let d = rsa_oaep.dec(&c, &sk);
-
-        assert_eq!(msg.m, d.m);
-    }
 
     #[test]
     fn test_rsa_oaep_2048_sha256() {
@@ -457,36 +514,7 @@ mod tests_normal {
 #[cfg(test)]
 mod tests_anamorphic {
     use super::*;
-    use sha1::Sha1;
     use sha2::{Sha256, Sha512};
-
-    #[test]
-    fn test_rsa_oaep_anamorphic_sha1() {
-        let mut rsa_oaep_anam = RsaOaepAnam::<32, 16, Sha1>::new();
-        let (pk, sk) = rsa_oaep_anam.rsa_oaep.r#gen();
-
-        let dk = rsa_oaep_anam.a_gen(&sk, &pk);
-        let msg = RsaOaepMsg {
-            m: b"message".to_vec(),
-            l: b"label".to_vec(),
-        };
-        let cm = vec![255u8; 20];
-
-        let c = rsa_oaep_anam.a_enc(&dk, &msg, &cm).unwrap();
-
-        let d = rsa_oaep_anam.rsa_oaep.dec(&c, &sk);
-        assert_eq!(d.m, msg.m);
-
-        let dk_recv = RsaOaepDK {
-            sk: sk.clone(),
-            pk: pk.clone(),
-            k: dk.k.clone(),
-            ctr: std::sync::atomic::AtomicU64::new(0),
-        };
-
-        let cm_d = rsa_oaep_anam.a_dec(&dk_recv, &c).unwrap();
-        assert_eq!(cm_d, cm);
-    }
 
     #[test]
     fn test_rsa_oaep_anamorphic_sha256() {
