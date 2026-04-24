@@ -71,7 +71,7 @@ pub struct RsaSK<const MOD_LIMBS: usize, const PRIME_LIMBS: usize> {
 /// - Panics at compile time if the modulus size (`MOD_LIMBS`) is not at least twice
 ///   the size of the prime factors (`PRIME_LIMBS`).
 #[derive(Debug)]
-pub(crate) struct RSA<const MOD_LIMBS: usize, const PRIME_LIMBS: usize> {
+pub struct RSA<const MOD_LIMBS: usize, const PRIME_LIMBS: usize> {
     rng: ChaCha20Rng,
 }
 
