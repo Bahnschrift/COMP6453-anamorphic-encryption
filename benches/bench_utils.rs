@@ -29,7 +29,7 @@ pub trait PkeBenchProvider {
     const MAX_MSG_BYTES: usize;
 
     /// Optional scheme-specific benchmarks
-    fn extra_benches(c: &mut Criterion) {}
+    fn extra_benches(c: &mut Criterion) -> ();
 }
 
 // Benchmark Runners
